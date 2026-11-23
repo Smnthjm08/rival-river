@@ -30,12 +30,23 @@ pub struct DelegateGame<'info> {
     /// CHECK: the Deck PDA for this game; same checks as `game`.
     #[account(mut, del, owner = crate::ID, seeds = [b"deck", game.key().as_ref()], bump)]
     pub deck: UncheckedAccount<'info>,
+
+    /// CHECK: the creator's Hand PDA; same checks as `game`.
+    #[account(mut, del, owner = crate::ID,
+              seeds = [b"hand", game.key().as_ref(), table.creator.as_ref()], bump)]
+    pub hand_creator: UncheckedAccount<'info>,
+
+    /// CHECK: the opponent's Hand PDA; same checks as `game`.
+    #[account(mut, del, owner = crate::ID,
+              seeds = [b"hand", game.key().as_ref(), table.opponent.as_ref()], bump)]
+    pub hand_opponent: UncheckedAccount<'info>,
 }
 
-/// Hands Game and Deck to the ephemeral rollup. From here until they are
-/// undelegated, all game instructions run on the rollup, not on Solana.
+/// Hands Game, Deck and both Hands to the ephemeral rollup. From here until
+/// they are undelegated, all game instructions run on the rollup, not Solana.
 pub fn delegate_game_handler(ctx: Context<DelegateGame>) -> Result<()> {
     let table = ctx.accounts.table.key();
+    let (creator, opponent) = (ctx.accounts.table.creator, ctx.accounts.table.opponent);
     let game = ctx.accounts.game.key();
     // Optional: pin a specific rollup validator by passing it as the first
     // remaining account. None = MagicBlock picks the default.
@@ -49,6 +60,16 @@ pub fn delegate_game_handler(ctx: Context<DelegateGame>) -> Result<()> {
     ctx.accounts.delegate_deck(
         &ctx.accounts.payer,
         &[b"deck", game.as_ref()],
+        DelegateConfig { validator, ..Default::default() },
+    )?;
+    ctx.accounts.delegate_hand_creator(
+        &ctx.accounts.payer,
+        &[b"hand", game.as_ref(), creator.as_ref()],
+        DelegateConfig { validator, ..Default::default() },
+    )?;
+    ctx.accounts.delegate_hand_opponent(
+        &ctx.accounts.payer,
+        &[b"hand", game.as_ref(), opponent.as_ref()],
         DelegateConfig { validator, ..Default::default() },
     )?;
     Ok(())

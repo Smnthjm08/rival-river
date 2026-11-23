@@ -59,3 +59,20 @@ pub struct Deck {
     pub shuffled: bool,
     pub bump: u8,
 }
+
+/// One player's private hand. Lives at ["hand", game, player]. On the private
+/// rollup only that player can read it.
+#[account]
+#[derive(InitSpace)]
+pub struct Hand {
+    pub game: Pubkey,
+    pub player: Pubkey,
+    /// The two hole cards (see poker.rs). Only meaningful once `dealt`.
+    pub cards: [u8; 2],
+    pub dealt: bool,
+    /// Random bytes the player mixes into the next shuffle, so the VRF oracle
+    /// alone can't know the deck. Cleared once used.
+    pub secret: [u8; 32],
+    pub has_secret: bool,
+    pub bump: u8,
+}

@@ -15,6 +15,7 @@ use {
     magicsvm::{MagicSVM, TransactionTarget::{self, Base, Ephemeral}},
     rival_river::{accounts, instruction, state::Game},
     solana_address::Address,
+    solana_compute_budget_interface::ComputeBudgetInstruction,
     solana_instruction::{AccountMeta, Instruction},
     solana_keypair::Keypair,
     solana_message::Message,
@@ -50,11 +51,20 @@ fn ix(data: impl InstructionData, accounts: impl ToAccountMetas) -> Instruction 
 }
 
 fn send(svm: &mut MagicSVM, target: TransactionTarget, signer: &Keypair, ix: Instruction) -> bool {
-    let msg = Message::new(&[ix], Some(&signer.pubkey()));
+    send_ixs(svm, target, signer, &[ix])
+}
+
+/// Sends one transaction. Run tests with `RR_LOGS=1` to print the logs of
+/// any transaction that fails.
+fn send_ixs(svm: &mut MagicSVM, target: TransactionTarget, signer: &Keypair, ixs: &[Instruction]) -> bool {
+    let msg = Message::new(ixs, Some(&signer.pubkey()));
     let tx = Transaction::new(&[signer], msg, svm.latest_blockhash_for(target));
-    let ok = svm.send_transaction_to(target, tx).is_ok();
+    let res = svm.send_transaction_to(target, tx);
+    if let (Err(f), Ok(_)) = (&res, std::env::var("RR_LOGS")) {
+        eprintln!("{:?}\n{:#?}", f.err, f.meta.logs);
+    }
     svm.expire_blockhash_for(target);
-    ok
+    res.is_ok()
 }
 
 fn owner(svm: &MagicSVM, target: TransactionTarget, account: Pubkey) -> Pubkey {
@@ -68,6 +78,8 @@ struct Setup {
     table: Pubkey,
     game: Pubkey,
     deck: Pubkey,
+    hand_creator: Pubkey,
+    hand_opponent: Pubkey,
 }
 
 /// Creates a table between two funded players. Does NOT run init_game.
@@ -82,23 +94,34 @@ fn setup() -> Setup {
     let table = pda(&[b"table", key(&creator).as_ref(), &1u64.to_le_bytes()]);
     let game = pda(&[b"game", table.as_ref()]);
     let deck = pda(&[b"deck", game.as_ref()]);
+    let hand_creator = pda(&[b"hand", game.as_ref(), key(&creator).as_ref()]);
+    let hand_opponent = pda(&[b"hand", game.as_ref(), key(&opponent).as_ref()]);
     assert!(send(&mut svm, Base, &creator, ix(
         instruction::CreateTable { table_id: 1, opponent: key(&opponent), creator_nft: Pubkey::new_unique() },
         accounts::CreateTable { creator: key(&creator), table, system_program: system_program::ID },
     )));
-    Setup { svm, creator, opponent, table, game, deck }
+    Setup { svm, creator, opponent, table, game, deck, hand_creator, hand_opponent }
 }
 
 fn init_game(s: &mut Setup) {
     let creator = key(&s.creator);
     assert!(send(&mut s.svm, Base, &s.creator, ix(
         instruction::InitGame {},
-        accounts::InitGame { creator, table: s.table, game: s.game, deck: s.deck, system_program: system_program::ID },
+        accounts::InitGame {
+            creator,
+            table: s.table,
+            game: s.game,
+            deck: s.deck,
+            hand_creator: s.hand_creator,
+            hand_opponent: s.hand_opponent,
+            system_program: system_program::ID,
+        },
     )));
 }
 
 fn delegate_game(s: &mut Setup, signer: &Keypair) -> bool {
     let (table, game, deck) = (s.table, s.game, s.deck);
+    let (hand_creator, hand_opponent) = (s.hand_creator, s.hand_opponent);
     let mut ix = ix(
         instruction::DelegateGame {},
         accounts::DelegateGame {
@@ -112,6 +135,14 @@ fn delegate_game(s: &mut Setup, signer: &Keypair) -> bool {
             delegation_record_deck: delegation_record_pda_from_delegated_account(&deck),
             delegation_metadata_deck: delegation_metadata_pda_from_delegated_account(&deck),
             deck,
+            buffer_hand_creator: delegate_buffer_pda_from_delegated_account_and_owner_program(&hand_creator, &rival_river::id()),
+            delegation_record_hand_creator: delegation_record_pda_from_delegated_account(&hand_creator),
+            delegation_metadata_hand_creator: delegation_metadata_pda_from_delegated_account(&hand_creator),
+            hand_creator,
+            buffer_hand_opponent: delegate_buffer_pda_from_delegated_account_and_owner_program(&hand_opponent, &rival_river::id()),
+            delegation_record_hand_opponent: delegation_record_pda_from_delegated_account(&hand_opponent),
+            delegation_metadata_hand_opponent: delegation_metadata_pda_from_delegated_account(&hand_opponent),
+            hand_opponent,
             owner_program: rival_river::id(),
             delegation_program: DelegationProgram::id(),
             system_program: system_program::ID,
@@ -119,7 +150,10 @@ fn delegate_game(s: &mut Setup, signer: &Keypair) -> bool {
     );
     // Pin MagicSVM's in-process rollup validator (the optional remaining account).
     ix.accounts.push(AccountMeta::new_readonly(s.svm.validator_identity(), false));
-    send(&mut s.svm, Base, signer, ix)
+    // Delegating 4 accounts can exceed the default 200k compute units, so the
+    // client raises the limit (the frontend must do the same).
+    let budget = ComputeBudgetInstruction::set_compute_unit_limit(400_000);
+    send_ixs(&mut s.svm, Base, signer, &[budget, ix])
 }
 
 #[test]
@@ -181,12 +215,15 @@ fn next_hand(s: &mut Setup, signer: &Keypair) -> bool {
 
 fn undelegate_game(s: &mut Setup, signer: &Keypair) -> bool {
     let (game, deck) = (s.game, s.deck);
+    let (hand_creator, hand_opponent) = (s.hand_creator, s.hand_opponent);
     send(&mut s.svm, Ephemeral, signer, ix(
         instruction::UndelegateGame {},
         accounts::UndelegateGame {
             payer: key(signer),
             game,
             deck,
+            hand_creator,
+            hand_opponent,
             magic_program: MagicProgram::id(),
             magic_context: MAGIC_CONTEXT_ID,
         },
@@ -360,4 +397,96 @@ fn nobody_can_call_the_callback_with_their_own_randomness() {
     forged.accounts.iter_mut().filter(|m| m.pubkey == identity).for_each(|m| m.is_signer = false);
     assert!(!send(&mut s.svm, Ephemeral, &attacker, forged));
     assert!(!read_deck(&s.svm, Ephemeral, s.deck).shuffled);
+}
+
+// ---- Private accounts: permissions ------------------------------------------
+
+use ephemeral_rollups_sdk::{
+    access_control::structs::{EphemeralPermission, AUTHORITY_FLAG},
+    consts::{EPHEMERAL_VAULT_ID, MAGIC_PROGRAM_ID, PERMISSION_PROGRAM_ID},
+};
+
+fn permission_of(account: Pubkey) -> Pubkey {
+    EphemeralPermission::find_pda(&account).0
+}
+
+fn init_permissions(s: &mut Setup, signer: &Keypair) -> bool {
+    let (game, deck, hand_creator, hand_opponent) = (s.game, s.deck, s.hand_creator, s.hand_opponent);
+    send(&mut s.svm, Ephemeral, signer, ix(
+        instruction::InitPermissions {},
+        accounts::InitPermissions {
+            payer: key(signer),
+            game,
+            deck,
+            hand_creator,
+            hand_opponent,
+            game_permission: permission_of(game),
+            deck_permission: permission_of(deck),
+            hand_creator_permission: permission_of(hand_creator),
+            hand_opponent_permission: permission_of(hand_opponent),
+            permission_program: PERMISSION_PROGRAM_ID,
+            ephemeral_vault: EPHEMERAL_VAULT_ID,
+            magic_program: MAGIC_PROGRAM_ID,
+        },
+    ))
+}
+
+/// (is_private, member pubkeys, any member has AUTHORITY_FLAG) for an account's
+/// permission on the rollup. The permission program always lists the owning
+/// program (ours) first, with no flags; programs can't log in to the RPC, so
+/// it can't read anything. It's left out of the returned list.
+fn readers(svm: &MagicSVM, account: Pubkey) -> (bool, Vec<Pubkey>, bool) {
+    let acc = svm
+        .get_account_for(Ephemeral, &addr(permission_of(account)))
+        .expect("permission account missing on the rollup");
+    assert_eq!(acc.owner.to_bytes(), PERMISSION_PROGRAM_ID.to_bytes());
+    let p = EphemeralPermission::from_bytes(&acc.data).unwrap();
+    assert_eq!(p.permissioned_account, account);
+    let (default, rest) = p.members.split_first().expect("default member");
+    assert_eq!((default.pubkey, default.flags), (rival_river::id(), 0));
+    let members = rest.iter().map(|m| m.pubkey).collect();
+    let authority = rest.iter().any(|m| m.flags & AUTHORITY_FLAG != 0);
+    (p.private, members, authority)
+}
+
+#[test]
+fn permissions_give_each_account_the_right_readers() {
+    let mut s = delegated();
+    let creator = s.creator.insecure_clone();
+    assert!(init_permissions(&mut s, &creator));
+
+    let (c, o) = (key(&s.creator), key(&s.opponent));
+    assert_eq!(readers(&s.svm, s.game), (true, vec![c, o], false), "Game: both players");
+    assert_eq!(readers(&s.svm, s.deck), (true, vec![], false), "Deck: nobody");
+    assert_eq!(readers(&s.svm, s.hand_creator), (true, vec![c], false), "creator's Hand");
+    assert_eq!(readers(&s.svm, s.hand_opponent), (true, vec![o], false), "opponent's Hand");
+}
+
+#[test]
+fn init_permissions_can_be_retried() {
+    let mut s = delegated();
+    let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    assert!(init_permissions(&mut s, &creator));
+    assert!(init_permissions(&mut s, &opponent));
+    assert_eq!(readers(&s.svm, s.deck), (true, vec![], false));
+}
+
+#[test]
+fn stranger_cannot_init_permissions() {
+    let mut s = delegated();
+    let stranger = Keypair::new();
+    s.svm.airdrop(&stranger.pubkey(), 1_000_000_000).unwrap();
+    assert!(!init_permissions(&mut s, &stranger));
+    assert!(s.svm.get_account_for(Ephemeral, &addr(permission_of(s.deck))).is_none());
+}
+
+#[test]
+fn hands_round_trip_with_permissions_in_place() {
+    let mut s = delegated();
+    let creator = s.creator.insecure_clone();
+    assert!(init_permissions(&mut s, &creator));
+    assert!(undelegate_game(&mut s, &creator));
+    for acc in [s.game, s.deck, s.hand_creator, s.hand_opponent] {
+        assert_eq!(owner(&s.svm, Base, acc), rival_river::id());
+    }
 }
