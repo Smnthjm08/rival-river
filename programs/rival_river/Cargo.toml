@@ -18,6 +18,8 @@ idl-build = ["anchor-lang/idl-build"]
 anchor-debug = []
 custom-heap = []
 custom-panic = []
+# Pins the local validator (MagicSVM) instead of devnet's TEE. Tests only.
+localnet = []
 
 
 [dependencies]

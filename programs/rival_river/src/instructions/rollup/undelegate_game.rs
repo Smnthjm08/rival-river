@@ -35,20 +35,52 @@ pub struct UndelegateGame<'info> {
 /// Ends the lease: writes the rollup's copies of Game, Deck and both Hands
 /// back to Solana, then the delegation program hands ownership back to this
 /// program (via the callback `#[ephemeral]` added).
-/// TODO(milestone 3, step 8): wipe the deck, unrevealed cards and secrets
-/// first, or they become public on Solana.
 pub fn undelegate_game_handler(ctx: Context<UndelegateGame>) -> Result<()> {
+    let a = ctx.accounts;
+    wipe_secrets(&mut a.game, &mut a.deck, &mut a.hand_creator, &mut a.hand_opponent);
+    // Save the wipe into the accounts' bytes now. Anchor normally does this
+    // when the instruction returns, but the commit below may read the bytes
+    // during the call, and would then send the unwiped data.
+    a.game.exit(&crate::ID)?;
+    a.deck.exit(&crate::ID)?;
+    a.hand_creator.exit(&crate::ID)?;
+    a.hand_opponent.exit(&crate::ID)?;
+
     MagicIntentBundleBuilder::new(
-        ctx.accounts.payer.to_account_info(),
-        ctx.accounts.magic_context.to_account_info(),
-        ctx.accounts.magic_program.to_account_info(),
+        a.payer.to_account_info(),
+        a.magic_context.to_account_info(),
+        a.magic_program.to_account_info(),
     )
     .commit_and_undelegate(&[
-        ctx.accounts.game.to_account_info(),
-        ctx.accounts.deck.to_account_info(),
-        ctx.accounts.hand_creator.to_account_info(),
-        ctx.accounts.hand_opponent.to_account_info(),
+        a.game.to_account_info(),
+        a.deck.to_account_info(),
+        a.hand_creator.to_account_info(),
+        a.hand_opponent.to_account_info(),
     ])
     .build_and_invoke()?;
     Ok(())
+}
+
+/// Solana is public: anything committed there can be read by anyone. Clear
+/// every card nobody has seen and every unused secret before it leaves the rollup.
+fn wipe_secrets(game: &mut Game, deck: &mut Deck, creator: &mut Hand, opponent: &mut Hand) {
+    // The deck order reveals every undealt card (and both players' hands).
+    deck.cards = [0; 52];
+    deck.next = 0;
+    deck.shuffled = false;
+    // A VRF answer still on its way can't land once the deck is back on
+    // Solana; without this, request_shuffle would refuse forever.
+    deck.pending = false;
+
+    for hand in [creator, opponent] {
+        hand.cards = [0; 2];
+        hand.dealt = false;
+        // A secret submitted for a shuffle that never ran.
+        hand.secret = [0; 32];
+        hand.has_secret = false;
+    }
+
+    // Permissions live only on the rollup. Make the next delegation run
+    // init_permissions again before anyone can submit a secret.
+    game.permissions_ready = false;
 }

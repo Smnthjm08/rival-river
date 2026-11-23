@@ -1,7 +1,8 @@
 use anchor_lang::prelude::*;
 use ephemeral_rollups_sdk::access_control::instructions::CreateEphemeralPermissionCpi;
 use ephemeral_rollups_sdk::access_control::structs::{
-    EphemeralMembersArgs, Member, TX_BALANCES_FLAG, TX_LOGS_FLAG, TX_MESSAGE_FLAG,
+    EphemeralMembersArgs, Member, PERMISSION_SEED, TX_BALANCES_FLAG, TX_LOGS_FLAG,
+    TX_MESSAGE_FLAG,
 };
 use ephemeral_rollups_sdk::consts::{EPHEMERAL_VAULT_ID, MAGIC_PROGRAM_ID, PERMISSION_PROGRAM_ID};
 
@@ -38,17 +39,23 @@ pub struct InitPermissions<'info> {
     pub hand_opponent: Account<'info, Hand>,
 
     /// CHECK: permission PDA of `game` ([PERMISSION_SEED, game] under the
-    /// permission program). The permission program checks the address.
-    #[account(mut)]
+    /// permission program). Seeds pin the address: otherwise a player could
+    /// pass an existing permission (e.g. Game's in every slot) and the loop
+    /// below would skip creating the real ones, leaving those accounts public.
+    #[account(mut, seeds = [PERMISSION_SEED, game.key().as_ref()], bump,
+              seeds::program = PERMISSION_PROGRAM_ID)]
     pub game_permission: UncheckedAccount<'info>,
-    /// CHECK: permission PDA of `deck`; checked by the permission program.
-    #[account(mut)]
+    /// CHECK: permission PDA of `deck`; same checks.
+    #[account(mut, seeds = [PERMISSION_SEED, deck.key().as_ref()], bump,
+              seeds::program = PERMISSION_PROGRAM_ID)]
     pub deck_permission: UncheckedAccount<'info>,
-    /// CHECK: permission PDA of `hand_creator`; checked by the permission program.
-    #[account(mut)]
+    /// CHECK: permission PDA of `hand_creator`; same checks.
+    #[account(mut, seeds = [PERMISSION_SEED, hand_creator.key().as_ref()], bump,
+              seeds::program = PERMISSION_PROGRAM_ID)]
     pub hand_creator_permission: UncheckedAccount<'info>,
-    /// CHECK: permission PDA of `hand_opponent`; checked by the permission program.
-    #[account(mut)]
+    /// CHECK: permission PDA of `hand_opponent`; same checks.
+    #[account(mut, seeds = [PERMISSION_SEED, hand_opponent.key().as_ref()], bump,
+              seeds::program = PERMISSION_PROGRAM_ID)]
     pub hand_opponent_permission: UncheckedAccount<'info>,
 
     /// CHECK: MagicBlock's permission program.
@@ -124,5 +131,6 @@ pub fn init_permissions_handler(ctx: Context<InitPermissions>) -> Result<()> {
         }
         .invoke_signed(&[seeds])?;
     }
+    ctx.accounts.game.permissions_ready = true;
     Ok(())
 }

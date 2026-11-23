@@ -43,6 +43,9 @@ pub struct Game {
     /// the rollup can check who's playing without reading the Table on Solana.
     pub players: [Pubkey; 2],
     pub hand_number: u8,
+    /// Set by init_permissions. Until then every account on the private
+    /// rollup is public, so no secrets (and therefore no cards) before it.
+    pub permissions_ready: bool,
     pub bump: u8,
 }
 

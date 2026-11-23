@@ -12,7 +12,11 @@ pub struct SubmitSecret<'info> {
     #[account(constraint = game.players.contains(&player.key()) @ ErrorCode::NotAPlayer)]
     pub player: Signer<'info>,
 
-    #[account(seeds = [GAME_SEED, game.table.as_ref()], bump = game.bump)]
+    /// `permissions_ready`: a secret written before init_permissions would sit
+    /// in a public account. The shuffle needs both secrets, so this also keeps
+    /// cards from being dealt before the accounts are private.
+    #[account(seeds = [GAME_SEED, game.table.as_ref()], bump = game.bump,
+              constraint = game.permissions_ready @ ErrorCode::PermissionsMissing)]
     pub game: Account<'info, Game>,
 
     /// Seeds include the signer's key, so a player can only write their own Hand.

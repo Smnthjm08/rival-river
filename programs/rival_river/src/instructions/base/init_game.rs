@@ -65,6 +65,7 @@ pub fn init_game_handler(ctx: Context<InitGame>) -> Result<()> {
         table: table.key(),
         players: [table.creator, table.opponent],
         hand_number: 0,
+        permissions_ready: false,
         bump: ctx.bumps.game,
     });
     ctx.accounts.deck.set_inner(Deck {

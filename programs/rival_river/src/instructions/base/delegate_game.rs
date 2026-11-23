@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use ephemeral_rollups_sdk::anchor::delegate;
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
 
-use crate::constants::{DECK_SEED, GAME_SEED, HAND_SEED};
+use crate::constants::{DECK_SEED, ER_VALIDATOR, GAME_SEED, HAND_SEED};
 use crate::error::ErrorCode;
 use crate::state::Table;
 
@@ -49,9 +49,9 @@ pub fn delegate_game_handler(ctx: Context<DelegateGame>) -> Result<()> {
     let table = ctx.accounts.table.key();
     let (creator, opponent) = (ctx.accounts.table.creator, ctx.accounts.table.opponent);
     let game = ctx.accounts.game.key();
-    // Optional: pin a specific rollup validator by passing it as the first
-    // remaining account. None = MagicBlock picks the default.
-    let validator = ctx.remaining_accounts.first().map(|a| a.key());
+    // Never the caller's choice: only the private validator enforces the
+    // permissions that keep the deck and hands secret.
+    let validator = Some(ER_VALIDATOR);
 
     ctx.accounts.delegate_game(
         &ctx.accounts.payer,

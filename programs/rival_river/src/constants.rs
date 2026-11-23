@@ -24,3 +24,16 @@ pub const HAND_SEED: &[u8] = b"hand";
 /// Each delegated account is pre-funded for a permission this size in
 /// init_game, since it pays its own permission rent on the rollup.
 pub const MAX_PERMISSION_MEMBERS: usize = 2;
+
+/// The rollup validator Game, Deck and Hands are delegated to. It must be a
+/// private (TEE) validator: on any other, permissions aren't enforced and the
+/// deck is public. Devnet TEE (`getIdentity` on devnet-tee.magicblock.app).
+#[cfg(not(feature = "localnet"))]
+pub const ER_VALIDATOR: Pubkey =
+    Pubkey::from_str_const("MTEWGuqxUpYZGFJQcp8tLN7x5v9BSeoFHYWQQ3n3xzo");
+
+/// MagicSVM's validator, for local tests. Its keypair is public, so never
+/// deploy a `localnet` build.
+#[cfg(feature = "localnet")]
+pub const ER_VALIDATOR: Pubkey =
+    Pubkey::from_str_const("mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev");

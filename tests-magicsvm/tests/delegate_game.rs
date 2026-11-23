@@ -122,7 +122,7 @@ fn init_game(s: &mut Setup) {
 fn delegate_game(s: &mut Setup, signer: &Keypair) -> bool {
     let (table, game, deck) = (s.table, s.game, s.deck);
     let (hand_creator, hand_opponent) = (s.hand_creator, s.hand_opponent);
-    let mut ix = ix(
+    let ix = ix(
         instruction::DelegateGame {},
         accounts::DelegateGame {
             payer: key(signer),
@@ -148,8 +148,6 @@ fn delegate_game(s: &mut Setup, signer: &Keypair) -> bool {
             system_program: system_program::ID,
         },
     );
-    // Pin MagicSVM's in-process rollup validator (the optional remaining account).
-    ix.accounts.push(AccountMeta::new_readonly(s.svm.validator_identity(), false));
     // Delegating 4 accounts can exceed the default 200k compute units, so the
     // client raises the limit (the frontend must do the same).
     let budget = ComputeBudgetInstruction::set_compute_unit_limit(400_000);
@@ -198,11 +196,38 @@ fn cannot_delegate_before_init_game() {
     assert!(!delegate_game(&mut s, &creator));
 }
 
+#[test]
+fn delegates_to_the_pinned_validator() {
+    // The program picks the validator itself (ER_VALIDATOR; MagicSVM's under
+    // the `localnet` feature), so a player can't send the game to a public rollup.
+    let mut s = setup();
+    init_game(&mut s);
+    let creator = s.creator.insecure_clone();
+    assert!(delegate_game(&mut s, &creator));
+    let validator = s.svm.validator_identity().to_bytes();
+    for acc in [s.game, s.deck, s.hand_creator, s.hand_opponent] {
+        let record = s.svm
+            .get_account_for(Base, &addr(delegation_record_pda_from_delegated_account(&acc)))
+            .unwrap();
+        // DelegationRecord: 8-byte discriminator, then the validator.
+        assert_eq!(&record.data[8..40], &validator[..]);
+    }
+}
+
 // ---- Rollup play + undelegate ----------------------------------------------
 
+/// Account data as the program sees it. `get_account_for(Ephemeral, ..)`
+/// hides private accounts from non-members, like the real PER RPC; these
+/// assertions need to see everything, so read the rollup's store directly.
+fn raw_data(svm: &MagicSVM, target: TransactionTarget, account: Pubkey) -> Vec<u8> {
+    match target {
+        Base => svm.get_account_for(Base, &addr(account)).unwrap().data,
+        Ephemeral => svm.ephemeral().get_account(&addr(account)).unwrap().data,
+    }
+}
+
 fn read_game(svm: &MagicSVM, target: TransactionTarget, game: Pubkey) -> Game {
-    let data = svm.get_account_for(target, &addr(game)).unwrap().data;
-    Game::try_deserialize(&mut data.as_slice()).unwrap()
+    Game::try_deserialize(&mut raw_data(svm, target, game).as_slice()).unwrap()
 }
 
 fn next_hand(s: &mut Setup, signer: &Keypair) -> bool {
@@ -293,13 +318,11 @@ use {
 const SLOT_HASHES: Pubkey = Pubkey::from_str_const("SysvarS1otHashes111111111111111111111111111");
 
 fn read_deck(svm: &MagicSVM, target: TransactionTarget, deck: Pubkey) -> Deck {
-    let data = svm.get_account_for(target, &addr(deck)).unwrap().data;
-    Deck::try_deserialize(&mut data.as_slice()).unwrap()
+    Deck::try_deserialize(&mut raw_data(svm, target, deck).as_slice()).unwrap()
 }
 
 fn read_hand(svm: &MagicSVM, target: TransactionTarget, hand: Pubkey) -> Hand {
-    let data = svm.get_account_for(target, &addr(hand)).unwrap().data;
-    Hand::try_deserialize(&mut data.as_slice()).unwrap()
+    Hand::try_deserialize(&mut raw_data(svm, target, hand).as_slice()).unwrap()
 }
 
 /// `hand` is the Hand account to write; normally the signer's own.
@@ -371,7 +394,7 @@ fn assert_full_deck(cards: [u8; 52]) {
 
 #[test]
 fn shuffle_deals_two_cards_to_each_player() {
-    let mut s = delegated();
+    let mut s = private();
     both_secrets(&mut s);
     let creator = s.creator.insecure_clone();
 
@@ -403,7 +426,7 @@ fn shuffle_deals_two_cards_to_each_player() {
 
 #[test]
 fn shuffle_waits_for_both_secrets() {
-    let mut s = delegated();
+    let mut s = private();
     let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
 
     assert!(!request_shuffle(&mut s, &creator), "no secrets yet");
@@ -415,7 +438,7 @@ fn shuffle_waits_for_both_secrets() {
 
 #[test]
 fn secret_cannot_be_changed_once_submitted() {
-    let mut s = delegated();
+    let mut s = private();
     let creator = s.creator.insecure_clone();
     assert!(submit_secret(&mut s, &creator, [1; 32]));
     assert!(!submit_secret(&mut s, &creator, [9; 32]));
@@ -424,7 +447,7 @@ fn secret_cannot_be_changed_once_submitted() {
 
 #[test]
 fn player_cannot_write_the_other_players_hand() {
-    let mut s = delegated();
+    let mut s = private();
     let creator = s.creator.insecure_clone();
     let theirs = s.hand_opponent;
     assert!(!submit_secret_to(&mut s, &creator, theirs, [7; 32]));
@@ -433,7 +456,7 @@ fn player_cannot_write_the_other_players_hand() {
 
 #[test]
 fn only_one_shuffle_at_a_time() {
-    let mut s = delegated();
+    let mut s = private();
     both_secrets(&mut s);
     let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
     assert!(request_shuffle(&mut s, &creator));
@@ -442,7 +465,7 @@ fn only_one_shuffle_at_a_time() {
 
 #[test]
 fn each_hand_gets_a_new_deck_and_needs_new_secrets() {
-    let mut s = delegated();
+    let mut s = private();
     let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
 
     shuffle_and_deal(&mut s);
@@ -459,7 +482,7 @@ fn each_hand_gets_a_new_deck_and_needs_new_secrets() {
 
 #[test]
 fn stranger_cannot_submit_a_secret_or_request_a_shuffle() {
-    let mut s = delegated();
+    let mut s = private();
     let stranger = Keypair::new();
     s.svm.airdrop(&stranger.pubkey(), 1_000_000_000).unwrap();
     let hand = s.hand_creator;
@@ -470,7 +493,7 @@ fn stranger_cannot_submit_a_secret_or_request_a_shuffle() {
 
 #[test]
 fn nobody_can_call_the_callback_with_their_own_randomness() {
-    let mut s = delegated();
+    let mut s = private();
     both_secrets(&mut s);
     let attacker = s.creator.insecure_clone();
     let (deck, hand_creator, hand_opponent) = (s.deck, s.hand_creator, s.hand_opponent);
@@ -509,7 +532,15 @@ fn permission_of(account: Pubkey) -> Pubkey {
 }
 
 fn init_permissions(s: &mut Setup, signer: &Keypair) -> bool {
+    let p = [s.game, s.deck, s.hand_creator, s.hand_opponent].map(permission_of);
+    init_permissions_with(s, signer, p)
+}
+
+/// Permission accounts to pass for Game, Deck, creator Hand, opponent Hand.
+/// Normally each account's own; tests pass wrong ones to check they're refused.
+fn init_permissions_with(s: &mut Setup, signer: &Keypair, permissions: [Pubkey; 4]) -> bool {
     let (game, deck, hand_creator, hand_opponent) = (s.game, s.deck, s.hand_creator, s.hand_opponent);
+    let [game_permission, deck_permission, hand_creator_permission, hand_opponent_permission] = permissions;
     send(&mut s.svm, Ephemeral, signer, ix(
         instruction::InitPermissions {},
         accounts::InitPermissions {
@@ -518,15 +549,65 @@ fn init_permissions(s: &mut Setup, signer: &Keypair) -> bool {
             deck,
             hand_creator,
             hand_opponent,
-            game_permission: permission_of(game),
-            deck_permission: permission_of(deck),
-            hand_creator_permission: permission_of(hand_creator),
-            hand_opponent_permission: permission_of(hand_opponent),
+            game_permission,
+            deck_permission,
+            hand_creator_permission,
+            hand_opponent_permission,
             permission_program: PERMISSION_PROGRAM_ID,
             ephemeral_vault: EPHEMERAL_VAULT_ID,
             magic_program: MAGIC_PROGRAM_ID,
         },
     ))
+}
+
+/// delegated() + init_permissions: ready for secrets and shuffles.
+fn private() -> Setup {
+    let mut s = delegated();
+    let creator = s.creator.insecure_clone();
+    assert!(init_permissions(&mut s, &creator));
+    s
+}
+
+#[test]
+fn init_permissions_rejects_a_reused_permission() {
+    let mut s = delegated();
+    let creator = s.creator.insecure_clone();
+    let game_permission = permission_of(s.game);
+    // The attack: Game's permission is created first, then the Deck and Hand
+    // slots see an existing permission and skip, leaving them public.
+    assert!(!init_permissions_with(&mut s, &creator, [game_permission; 4]));
+    assert!(s.svm.get_account_for(Ephemeral, &addr(game_permission)).is_none());
+}
+
+#[test]
+fn each_player_reads_only_their_own_hand() {
+    let mut s = private();
+    let (c, o) = (s.creator.pubkey(), s.opponent.pubkey());
+    let (game, deck, hand_c, hand_o) = (s.game, s.deck, s.hand_creator, s.hand_opponent);
+    // What the rollup's RPC would return to `viewer` (None = not logged in).
+    let mut can_read = |viewer: Option<Address>, account: Pubkey| {
+        s.svm.set_authorized_user(viewer);
+        s.svm.get_account_for(Ephemeral, &addr(account)).is_some()
+    };
+    for viewer in [None, Some(c), Some(o)] {
+        assert!(!can_read(viewer, deck), "nobody reads the Deck");
+    }
+    assert!(can_read(Some(c), hand_c));
+    assert!(!can_read(Some(o), hand_c));
+    assert!(can_read(Some(o), hand_o));
+    assert!(!can_read(Some(c), hand_o));
+    assert!(can_read(Some(c), game) && can_read(Some(o), game));
+    assert!(!can_read(None, game), "Game is private to the two players");
+}
+
+#[test]
+fn no_secrets_before_permissions() {
+    let mut s = delegated();
+    let creator = s.creator.insecure_clone();
+    assert!(!submit_secret(&mut s, &creator, [1; 32]), "Hand is still public");
+    assert!(init_permissions(&mut s, &creator));
+    assert!(read_game(&s.svm, Ephemeral, s.game).permissions_ready);
+    assert!(submit_secret(&mut s, &creator, [1; 32]));
 }
 
 /// (is_private, member pubkeys, any member has AUTHORITY_FLAG) for an account's
@@ -587,4 +668,40 @@ fn hands_round_trip_with_permissions_in_place() {
     for acc in [s.game, s.deck, s.hand_creator, s.hand_opponent] {
         assert_eq!(owner(&s.svm, Base, acc), rival_river::id());
     }
+}
+
+// ---- Undelegate wipes secrets -------------------------------------------------
+
+/// Everything that came back to Solana is public, so nothing secret may be in it.
+fn assert_nothing_secret_on_solana(s: &Setup) {
+    let deck = read_deck(&s.svm, Base, s.deck);
+    assert_eq!(deck.cards, [0; 52], "deck order leaked");
+    assert!(!deck.shuffled && !deck.pending);
+    for hand in [s.hand_creator, s.hand_opponent] {
+        let h = read_hand(&s.svm, Base, hand);
+        assert_eq!(h.cards, [0; 2], "hole cards leaked");
+        assert_eq!(h.secret, [0; 32], "secret leaked");
+        assert!(!h.dealt && !h.has_secret);
+    }
+    assert!(!read_game(&s.svm, Base, s.game).permissions_ready);
+}
+
+#[test]
+fn undelegate_after_a_deal_leaves_no_cards_on_solana() {
+    let mut s = private();
+    let creator = s.creator.insecure_clone();
+    shuffle_and_deal(&mut s);
+    assert!(undelegate_game(&mut s, &creator));
+    assert_nothing_secret_on_solana(&s);
+}
+
+#[test]
+fn undelegate_mid_shuffle_leaves_no_secrets_on_solana() {
+    let mut s = private();
+    let creator = s.creator.insecure_clone();
+    // Secrets are in, the oracle hasn't answered: the worst moment to leave.
+    both_secrets(&mut s);
+    assert!(request_shuffle(&mut s, &creator));
+    assert!(undelegate_game(&mut s, &creator));
+    assert_nothing_secret_on_solana(&s);
 }

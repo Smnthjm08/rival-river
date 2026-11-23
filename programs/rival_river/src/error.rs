@@ -14,4 +14,6 @@ pub enum ErrorCode {
     ShufflePending,
     #[msg("Hand accounts don't belong to this deck's game")]
     WrongHand,
+    #[msg("Run init_permissions first: until then the rollup accounts are public")]
+    PermissionsMissing,
 }
