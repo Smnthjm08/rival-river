@@ -2692,6 +2692,7 @@ dependencies = [
  "litesvm",
  "solana-keypair",
  "solana-message 3.1.0",
+ "solana-sha256-hasher 3.1.0",
  "solana-signer",
  "solana-transaction",
 ]

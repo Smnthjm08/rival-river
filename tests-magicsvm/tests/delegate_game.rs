@@ -67,6 +67,7 @@ struct Setup {
     opponent: Keypair,
     table: Pubkey,
     game: Pubkey,
+    deck: Pubkey,
 }
 
 /// Creates a table between two funded players. Does NOT run init_game.
@@ -80,23 +81,24 @@ fn setup() -> Setup {
     }
     let table = pda(&[b"table", key(&creator).as_ref(), &1u64.to_le_bytes()]);
     let game = pda(&[b"game", table.as_ref()]);
+    let deck = pda(&[b"deck", game.as_ref()]);
     assert!(send(&mut svm, Base, &creator, ix(
         instruction::CreateTable { table_id: 1, opponent: key(&opponent), creator_nft: Pubkey::new_unique() },
         accounts::CreateTable { creator: key(&creator), table, system_program: system_program::ID },
     )));
-    Setup { svm, creator, opponent, table, game }
+    Setup { svm, creator, opponent, table, game, deck }
 }
 
 fn init_game(s: &mut Setup) {
     let creator = key(&s.creator);
     assert!(send(&mut s.svm, Base, &s.creator, ix(
         instruction::InitGame {},
-        accounts::InitGame { creator, table: s.table, game: s.game, system_program: system_program::ID },
+        accounts::InitGame { creator, table: s.table, game: s.game, deck: s.deck, system_program: system_program::ID },
     )));
 }
 
 fn delegate_game(s: &mut Setup, signer: &Keypair) -> bool {
-    let (table, game) = (s.table, s.game);
+    let (table, game, deck) = (s.table, s.game, s.deck);
     let mut ix = ix(
         instruction::DelegateGame {},
         accounts::DelegateGame {
@@ -106,6 +108,10 @@ fn delegate_game(s: &mut Setup, signer: &Keypair) -> bool {
             delegation_record_game: delegation_record_pda_from_delegated_account(&game),
             delegation_metadata_game: delegation_metadata_pda_from_delegated_account(&game),
             game,
+            buffer_deck: delegate_buffer_pda_from_delegated_account_and_owner_program(&deck, &rival_river::id()),
+            delegation_record_deck: delegation_record_pda_from_delegated_account(&deck),
+            delegation_metadata_deck: delegation_metadata_pda_from_delegated_account(&deck),
+            deck,
             owner_program: rival_river::id(),
             delegation_program: DelegationProgram::id(),
             system_program: system_program::ID,
@@ -174,12 +180,13 @@ fn next_hand(s: &mut Setup, signer: &Keypair) -> bool {
 }
 
 fn undelegate_game(s: &mut Setup, signer: &Keypair) -> bool {
-    let game = s.game;
+    let (game, deck) = (s.game, s.deck);
     send(&mut s.svm, Ephemeral, signer, ix(
         instruction::UndelegateGame {},
         accounts::UndelegateGame {
             payer: key(signer),
             game,
+            deck,
             magic_program: MagicProgram::id(),
             magic_context: MAGIC_CONTEXT_ID,
         },
@@ -236,4 +243,121 @@ fn game_is_locked_on_solana_while_delegated() {
         instruction::NextHand {},
         accounts::NextHand { player: key(&creator), game },
     )));
+}
+
+// ---- VRF shuffle -------------------------------------------------------------
+
+use {
+    ephemeral_rollups_sdk::vrf::consts::{scoped_vrf_identity, DEFAULT_EPHEMERAL_QUEUE, VRF_PROGRAM_ID},
+    rival_river::state::Deck,
+    solana_clock::Clock,
+};
+
+const SLOT_HASHES: Pubkey = Pubkey::from_str_const("SysvarS1otHashes111111111111111111111111111");
+
+fn read_deck(svm: &MagicSVM, target: TransactionTarget, deck: Pubkey) -> Deck {
+    let data = svm.get_account_for(target, &addr(deck)).unwrap().data;
+    Deck::try_deserialize(&mut data.as_slice()).unwrap()
+}
+
+fn request_shuffle(s: &mut Setup, signer: &Keypair) -> bool {
+    let (game, deck) = (s.game, s.deck);
+    send(&mut s.svm, Ephemeral, signer, ix(
+        instruction::RequestShuffle {},
+        accounts::RequestShuffle {
+            player: key(signer),
+            game,
+            deck,
+            oracle_queue: Pubkey::new_from_array(DEFAULT_EPHEMERAL_QUEUE.to_bytes()),
+            program_identity: pda(&[b"identity"]),
+            vrf_program: Pubkey::new_from_array(VRF_PROGRAM_ID.to_bytes()),
+            slot_hashes: SLOT_HASHES,
+            system_program: system_program::ID,
+        },
+    ))
+}
+
+/// MagicSVM plays the oracle: advancing one slot delivers pending VRF
+/// callbacks. Returns how many callbacks ran, panicking if one failed.
+fn fulfill(svm: &mut MagicSVM) -> usize {
+    let slot = svm.get_sysvar::<Clock>().slot;
+    let results = svm.warp_to_slot(slot + 1);
+    for r in &results {
+        if let Err(f) = r {
+            panic!("callback failed: {:?}\nlogs: {:#?}", f.err, f.meta.logs);
+        }
+    }
+    results.len()
+}
+
+fn assert_full_deck(cards: [u8; 52]) {
+    let mut sorted = cards;
+    sorted.sort();
+    assert_eq!(sorted, core::array::from_fn(|i| i as u8), "not a permutation of 0..52");
+}
+
+#[test]
+fn vrf_shuffles_the_deck_on_the_rollup() {
+    let mut s = delegated();
+    let creator = s.creator.insecure_clone();
+
+    assert!(request_shuffle(&mut s, &creator));
+    // Step 1 done, the oracle hasn't answered yet.
+    assert!(!read_deck(&s.svm, Ephemeral, s.deck).shuffled);
+
+    // Step 2: the oracle answers, the VRF program calls callback_shuffle.
+    assert_eq!(fulfill(&mut s.svm), 1);
+    let deck = read_deck(&s.svm, Ephemeral, s.deck);
+    assert!(deck.shuffled);
+    assert_full_deck(deck.cards);
+    assert_ne!(deck.cards, core::array::from_fn(|i| i as u8), "deck wasn't shuffled");
+}
+
+#[test]
+fn each_hand_gets_a_new_deck() {
+    let mut s = delegated();
+    let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+
+    assert!(request_shuffle(&mut s, &creator));
+    fulfill(&mut s.svm);
+    let first = read_deck(&s.svm, Ephemeral, s.deck).cards;
+
+    assert!(next_hand(&mut s, &creator));
+    assert!(request_shuffle(&mut s, &opponent));
+    fulfill(&mut s.svm);
+    let second = read_deck(&s.svm, Ephemeral, s.deck).cards;
+
+    assert_full_deck(second);
+    assert_ne!(first, second);
+}
+
+#[test]
+fn stranger_cannot_request_a_shuffle() {
+    let mut s = delegated();
+    let stranger = Keypair::new();
+    s.svm.airdrop(&stranger.pubkey(), 1_000_000_000).unwrap();
+    assert!(!request_shuffle(&mut s, &stranger));
+}
+
+#[test]
+fn nobody_can_call_the_callback_with_their_own_randomness() {
+    let mut s = delegated();
+    let attacker = s.creator.insecure_clone();
+    let deck = s.deck;
+
+    // Pretend to be the VRF program: wrong signer.
+    assert!(!send(&mut s.svm, Ephemeral, &attacker, ix(
+        instruction::CallbackShuffle { randomness: [0u8; 32] },
+        accounts::CallbackShuffle { deck, vrf_program_identity: key(&attacker) },
+    )));
+    // Name the real VRF identity: it can't sign, so the transaction can't be built
+    // with it as a signer. Sending it unsigned must fail too.
+    let mut forged = ix(
+        instruction::CallbackShuffle { randomness: [0u8; 32] },
+        accounts::CallbackShuffle { deck, vrf_program_identity: scoped_vrf_identity(&rival_river::id()) },
+    );
+    let identity = addr(scoped_vrf_identity(&rival_river::id()));
+    forged.accounts.iter_mut().filter(|m| m.pubkey == identity).for_each(|m| m.is_signer = false);
+    assert!(!send(&mut s.svm, Ephemeral, &attacker, forged));
+    assert!(!read_deck(&s.svm, Ephemeral, s.deck).shuffled);
 }

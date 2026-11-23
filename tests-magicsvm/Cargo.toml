@@ -14,6 +14,7 @@ rival_river = { path = "../programs/rival_river", features = ["no-entrypoint"] }
 ephemeral-rollups-sdk = { version = "0.16.2", features = ["anchor"] }
 magicsvm = "0.3.0"
 solana-address = "~2.6.1"
+solana-clock = "3"
 solana-instruction = { version = "~3.4.0", features = ["bincode"] }
 solana-keypair = "3.1.2"
 solana-message = "4.2.4"

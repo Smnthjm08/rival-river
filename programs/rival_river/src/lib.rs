@@ -43,4 +43,12 @@ pub mod rival_river {
     pub fn undelegate_game(ctx: Context<UndelegateGame>) -> Result<()> {
         undelegate_game::undelegate_game_handler(ctx)
     }
+
+    pub fn request_shuffle(ctx: Context<RequestShuffle>) -> Result<()> {
+        request_shuffle::request_shuffle_handler(ctx)
+    }
+
+    pub fn callback_shuffle(ctx: Context<CallbackShuffle>, randomness: [u8; 32]) -> Result<()> {
+        callback_shuffle::callback_shuffle_handler(ctx, randomness)
+    }
 }

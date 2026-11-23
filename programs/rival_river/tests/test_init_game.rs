@@ -4,7 +4,7 @@ use {
         InstructionData, ToAccountMetas,
     },
     litesvm::LiteSVM,
-    rival_river::state::Game,
+    rival_river::state::{Deck, Game},
     solana_keypair::Keypair,
     solana_message::{Message, VersionedMessage},
     solana_signer::Signer,
@@ -55,13 +55,15 @@ fn create_table(svm: &mut LiteSVM, creator: &Keypair) -> Pubkey {
 }
 
 fn init_game(svm: &mut LiteSVM, signer: &Keypair, table: Pubkey) -> bool {
+    let game = pda(&[b"game", table.as_ref()]);
     let ix = Instruction::new_with_bytes(
         rival_river::id(),
         &rival_river::instruction::InitGame {}.data(),
         rival_river::accounts::InitGame {
             creator: signer.pubkey(),
             table,
-            game: pda(&[b"game", table.as_ref()]),
+            game,
+            deck: pda(&[b"deck", game.as_ref()]),
             system_program: anchor_lang::system_program::ID,
         }
         .to_account_metas(None),
@@ -76,11 +78,17 @@ fn creator_opens_game_for_their_table() {
 
     assert!(init_game(&mut svm, &creator, table));
 
-    let account = svm.get_account(&pda(&[b"game", table.as_ref()])).unwrap();
+    let game_key = pda(&[b"game", table.as_ref()]);
+    let account = svm.get_account(&game_key).unwrap();
     assert_eq!(account.owner, rival_river::id());
     let game = Game::try_deserialize(&mut account.data.as_slice()).unwrap();
     assert_eq!(game.table, table);
     assert_eq!(game.hand_number, 0);
+
+    let account = svm.get_account(&pda(&[b"deck", game_key.as_ref()])).unwrap();
+    let deck = Deck::try_deserialize(&mut account.data.as_slice()).unwrap();
+    assert_eq!(deck.game, game_key);
+    assert!(!deck.shuffled);
 }
 
 #[test]

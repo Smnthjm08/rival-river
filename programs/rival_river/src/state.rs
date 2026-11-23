@@ -45,3 +45,17 @@ pub struct Game {
     pub hand_number: u8,
     pub bump: u8,
 }
+
+/// The shuffled deck for the current hand. Lives at ["deck", game].
+/// Separate from Game so that on the private rollup it can be made readable
+/// by nobody, while Game stays readable by both players.
+#[account]
+#[derive(InitSpace)]
+pub struct Deck {
+    pub game: Pubkey,
+    /// Card ids (see poker.rs) in dealing order. Only meaningful once `shuffled`.
+    pub cards: [u8; 52],
+    /// Set by the VRF callback; cleared when a new shuffle is requested.
+    pub shuffled: bool,
+    pub bump: u8,
+}

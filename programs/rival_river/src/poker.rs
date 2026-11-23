@@ -110,9 +110,46 @@ pub fn best_of_seven(cards: [Card; 7]) -> u32 {
     best
 }
 
+/// Shuffles a fresh deck from a 32-byte seed (the VRF output) with
+/// Fisher–Yates: walk from the last card down, swapping each with a random
+/// card at or before it. Each swap gets its own random number,
+/// sha256(seed ‖ i), so one 32-byte seed drives all 51 swaps.
+/// Same seed → same deck, so anyone holding the seed can rebuild it:
+/// never log the seed.
+pub fn shuffle(seed: &[u8; 32]) -> [Card; DECK_SIZE] {
+    let mut deck: [Card; DECK_SIZE] = core::array::from_fn(|i| i as Card);
+    for i in (1..DECK_SIZE).rev() {
+        let h = solana_sha256_hasher::hashv(&[seed, &[i as u8]]).to_bytes();
+        // A u64 mod a number ≤ 52 has a bias of ~1 in 10^17: negligible.
+        let r = u64::from_le_bytes(h[..8].try_into().unwrap());
+        let j = (r % (i as u64 + 1)) as usize;
+        deck.swap(i, j);
+    }
+    deck
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shuffle_is_a_permutation_of_all_52_cards() {
+        let mut deck = shuffle(&[7u8; 32]);
+        deck.sort();
+        assert_eq!(deck, core::array::from_fn(|i| i as Card));
+    }
+
+    #[test]
+    fn shuffle_is_deterministic_per_seed() {
+        assert_eq!(shuffle(&[1u8; 32]), shuffle(&[1u8; 32]));
+        assert_ne!(shuffle(&[1u8; 32]), shuffle(&[2u8; 32]));
+    }
+
+    #[test]
+    fn shuffle_moves_cards() {
+        let identity: [Card; DECK_SIZE] = core::array::from_fn(|i| i as Card);
+        assert_ne!(shuffle(&[0u8; 32]), identity);
+    }
 
     /// "As" -> Ace of spades. Ranks: 23456789TJQKA, suits: cdhs.
     fn card(s: &str) -> Card {
