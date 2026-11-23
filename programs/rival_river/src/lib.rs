@@ -18,4 +18,13 @@ pub mod rival_river {
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
         initialize::handler(ctx)
     }
+
+    pub fn create_table(
+        ctx: Context<CreateTable>,
+        table_id: u64,
+        opponent: Pubkey,
+        creator_nft: Pubkey,
+    ) -> Result<()> {
+        create_table::handler(ctx, table_id, opponent, creator_nft)
+    }
 }

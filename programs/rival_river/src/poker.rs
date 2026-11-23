@@ -90,6 +90,26 @@ pub fn rank_five(cards: [Card; 5]) -> u32 {
     score
 }
 
+/// Best five-card score from seven cards (2 hole + 5 board).
+/// Picking 5 of 7 = choosing 2 to leave out, so we try all 21 pairs to skip.
+pub fn best_of_seven(cards: [Card; 7]) -> u32 {
+    let mut best = 0;
+    for skip_a in 0..7 {
+        for skip_b in (skip_a + 1)..7 {
+            let mut five = [0u8; 5];
+            let mut n = 0;
+            for (i, &c) in cards.iter().enumerate() {
+                if i != skip_a && i != skip_b {
+                    five[n] = c;
+                    n += 1;
+                }
+            }
+            best = best.max(rank_five(five));
+        }
+    }
+    best
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,5 +199,43 @@ mod tests {
     #[test]
     fn fifth_card_breaks_a_flush_tie() {
         assert!(rank_five(hand("Ah Jh 9h 7h 3h")) > rank_five(hand("As Js 9s 7s 2s")));
+    }
+
+    /// Two hole cards + five board cards, e.g. seven("Ah Kd", "Qc Jc Tc 2s 3h").
+    fn seven(hole: &str, board: &str) -> [Card; 7] {
+        let v: Vec<Card> = hole.split(' ').chain(board.split(' ')).map(card).collect();
+        v.try_into().unwrap()
+    }
+
+    #[test]
+    fn board_plays_and_splits() {
+        let board = "As Ks Qd Jc Th";
+        assert_eq!(
+            best_of_seven(seven("2c 3d", board)),
+            best_of_seven(seven("4c 5d", board))
+        );
+    }
+
+    #[test]
+    fn six_card_flush_uses_top_five() {
+        assert_eq!(
+            best_of_seven(seven("Ah 2h", "Kh Qh 9h 7h 3c")),
+            rank_five(hand("Ah Kh Qh 9h 7h"))
+        );
+    }
+
+    #[test]
+    fn flush_beats_straight_in_same_seven() {
+        // Has 9-8-7-6-5 straight and a K-high heart flush.
+        assert_eq!(best_of_seven(seven("9h 2h", "8h 7c 6d 5h Kh")) >> 20, FLUSH);
+    }
+
+    #[test]
+    fn three_pairs_keeps_best_two_and_kicker() {
+        // Pairs of K, Q, 7 + an Ace: best is K K Q Q A.
+        assert_eq!(
+            best_of_seven(seven("Qc Qd", "Kh Ks 7c 7d Ah")),
+            rank_five(hand("Kh Ks Qc Qd Ah"))
+        );
     }
 }
