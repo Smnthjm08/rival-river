@@ -31,3 +31,14 @@ pub enum TableStatus {
     /// Collectibles returned to their owners.
     Refunded,
 }
+
+/// Live match state (chips, pot, cards, whose turn). Created on Solana, then
+/// delegated to the rollup while hands are played. Lives at ["game", table].
+/// Kept separate from `Table` so the escrow never leaves Solana.
+#[account]
+#[derive(InitSpace)]
+pub struct Game {
+    pub table: Pubkey,
+    pub hand_number: u8,
+    pub bump: u8,
+}

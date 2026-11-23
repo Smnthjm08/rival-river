@@ -23,7 +23,7 @@ pub struct CreateTable<'info> {
 
 /// Opens a table and records which collectible the creator will stake.
 /// Nothing is escrowed yet: that happens once both players accept the stakes.
-pub fn handler(
+pub fn create_table_handler(
     ctx: Context<CreateTable>,
     table_id: u64,
     opponent: Pubkey,

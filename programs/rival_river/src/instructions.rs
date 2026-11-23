@@ -1,5 +1,5 @@
 pub mod create_table;
-pub mod initialize;
+pub mod init_game;
 
 pub use create_table::*;
-pub use initialize::*;
+pub use init_game::*;
