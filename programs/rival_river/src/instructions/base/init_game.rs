@@ -71,6 +71,8 @@ pub fn init_game_handler(ctx: Context<InitGame>) -> Result<()> {
         game: game_key,
         cards: [0; 52],
         shuffled: false,
+        pending: false,
+        next: 0,
         bump: ctx.bumps.deck,
     });
     let empty_hand = |player: Pubkey, bump: u8| Hand {

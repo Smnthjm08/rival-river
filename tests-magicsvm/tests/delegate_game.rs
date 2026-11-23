@@ -282,11 +282,11 @@ fn game_is_locked_on_solana_while_delegated() {
     )));
 }
 
-// ---- VRF shuffle -------------------------------------------------------------
+// ---- Secrets + VRF shuffle + dealing ---------------------------------------
 
 use {
     ephemeral_rollups_sdk::vrf::consts::{scoped_vrf_identity, DEFAULT_EPHEMERAL_QUEUE, VRF_PROGRAM_ID},
-    rival_river::state::Deck,
+    rival_river::state::{Deck, Hand},
     solana_clock::Clock,
 };
 
@@ -297,14 +297,42 @@ fn read_deck(svm: &MagicSVM, target: TransactionTarget, deck: Pubkey) -> Deck {
     Deck::try_deserialize(&mut data.as_slice()).unwrap()
 }
 
+fn read_hand(svm: &MagicSVM, target: TransactionTarget, hand: Pubkey) -> Hand {
+    let data = svm.get_account_for(target, &addr(hand)).unwrap().data;
+    Hand::try_deserialize(&mut data.as_slice()).unwrap()
+}
+
+/// `hand` is the Hand account to write; normally the signer's own.
+fn submit_secret_to(s: &mut Setup, signer: &Keypair, hand: Pubkey, secret: [u8; 32]) -> bool {
+    let game = s.game;
+    send(&mut s.svm, Ephemeral, signer, ix(
+        instruction::SubmitSecret { secret },
+        accounts::SubmitSecret { player: key(signer), game, hand },
+    ))
+}
+
+fn submit_secret(s: &mut Setup, signer: &Keypair, secret: [u8; 32]) -> bool {
+    let hand = pda(&[HAND_SEED, s.game.as_ref(), key(signer).as_ref()]);
+    submit_secret_to(s, signer, hand, secret)
+}
+
+/// Both players submit (different) secrets.
+fn both_secrets(s: &mut Setup) {
+    let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    assert!(submit_secret(s, &creator, [0xC1; 32]));
+    assert!(submit_secret(s, &opponent, [0x0B; 32]));
+}
+
 fn request_shuffle(s: &mut Setup, signer: &Keypair) -> bool {
-    let (game, deck) = (s.game, s.deck);
+    let (game, deck, hand_creator, hand_opponent) = (s.game, s.deck, s.hand_creator, s.hand_opponent);
     send(&mut s.svm, Ephemeral, signer, ix(
         instruction::RequestShuffle {},
         accounts::RequestShuffle {
             player: key(signer),
             game,
             deck,
+            hand_creator,
+            hand_opponent,
             oracle_queue: Pubkey::new_from_array(DEFAULT_EPHEMERAL_QUEUE.to_bytes()),
             program_identity: pda(&[b"identity"]),
             vrf_program: Pubkey::new_from_array(VRF_PROGRAM_ID.to_bytes()),
@@ -327,6 +355,14 @@ fn fulfill(svm: &mut MagicSVM) -> usize {
     results.len()
 }
 
+/// Secrets, request, oracle answer: a full shuffle + deal.
+fn shuffle_and_deal(s: &mut Setup) {
+    both_secrets(s);
+    let creator = s.creator.insecure_clone();
+    assert!(request_shuffle(s, &creator));
+    assert_eq!(fulfill(&mut s.svm), 1);
+}
+
 fn assert_full_deck(cards: [u8; 52]) {
     let mut sorted = cards;
     sorted.sort();
@@ -334,34 +370,87 @@ fn assert_full_deck(cards: [u8; 52]) {
 }
 
 #[test]
-fn vrf_shuffles_the_deck_on_the_rollup() {
+fn shuffle_deals_two_cards_to_each_player() {
     let mut s = delegated();
+    both_secrets(&mut s);
     let creator = s.creator.insecure_clone();
 
     assert!(request_shuffle(&mut s, &creator));
     // Step 1 done, the oracle hasn't answered yet.
-    assert!(!read_deck(&s.svm, Ephemeral, s.deck).shuffled);
+    let deck = read_deck(&s.svm, Ephemeral, s.deck);
+    assert!(deck.pending && !deck.shuffled);
 
     // Step 2: the oracle answers, the VRF program calls callback_shuffle.
     assert_eq!(fulfill(&mut s.svm), 1);
     let deck = read_deck(&s.svm, Ephemeral, s.deck);
-    assert!(deck.shuffled);
+    assert!(deck.shuffled && !deck.pending);
     assert_full_deck(deck.cards);
     assert_ne!(deck.cards, core::array::from_fn(|i| i as u8), "deck wasn't shuffled");
+
+    // Dealt alternately from the top; the board will start at card 4.
+    let (c, o) = (read_hand(&s.svm, Ephemeral, s.hand_creator), read_hand(&s.svm, Ephemeral, s.hand_opponent));
+    assert!(c.dealt && o.dealt);
+    assert_eq!(c.cards, [deck.cards[0], deck.cards[2]]);
+    assert_eq!(o.cards, [deck.cards[1], deck.cards[3]]);
+    assert_eq!(deck.next, 4);
+
+    // Secrets are used up and wiped.
+    for h in [c, o] {
+        assert!(!h.has_secret);
+        assert_eq!(h.secret, [0; 32]);
+    }
 }
 
 #[test]
-fn each_hand_gets_a_new_deck() {
+fn shuffle_waits_for_both_secrets() {
     let mut s = delegated();
     let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
 
+    assert!(!request_shuffle(&mut s, &creator), "no secrets yet");
+    assert!(submit_secret(&mut s, &creator, [1; 32]));
+    assert!(!request_shuffle(&mut s, &creator), "only one secret");
+    assert!(submit_secret(&mut s, &opponent, [2; 32]));
     assert!(request_shuffle(&mut s, &creator));
-    fulfill(&mut s.svm);
+}
+
+#[test]
+fn secret_cannot_be_changed_once_submitted() {
+    let mut s = delegated();
+    let creator = s.creator.insecure_clone();
+    assert!(submit_secret(&mut s, &creator, [1; 32]));
+    assert!(!submit_secret(&mut s, &creator, [9; 32]));
+    assert_eq!(read_hand(&s.svm, Ephemeral, s.hand_creator).secret, [1; 32]);
+}
+
+#[test]
+fn player_cannot_write_the_other_players_hand() {
+    let mut s = delegated();
+    let creator = s.creator.insecure_clone();
+    let theirs = s.hand_opponent;
+    assert!(!submit_secret_to(&mut s, &creator, theirs, [7; 32]));
+    assert!(!read_hand(&s.svm, Ephemeral, s.hand_opponent).has_secret);
+}
+
+#[test]
+fn only_one_shuffle_at_a_time() {
+    let mut s = delegated();
+    both_secrets(&mut s);
+    let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    assert!(request_shuffle(&mut s, &creator));
+    assert!(!request_shuffle(&mut s, &opponent), "callback hasn't arrived yet");
+}
+
+#[test]
+fn each_hand_gets_a_new_deck_and_needs_new_secrets() {
+    let mut s = delegated();
+    let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+
+    shuffle_and_deal(&mut s);
     let first = read_deck(&s.svm, Ephemeral, s.deck).cards;
 
     assert!(next_hand(&mut s, &creator));
-    assert!(request_shuffle(&mut s, &opponent));
-    fulfill(&mut s.svm);
+    assert!(!request_shuffle(&mut s, &opponent), "last hand's secrets were used up");
+    shuffle_and_deal(&mut s);
     let second = read_deck(&s.svm, Ephemeral, s.deck).cards;
 
     assert_full_deck(second);
@@ -369,34 +458,43 @@ fn each_hand_gets_a_new_deck() {
 }
 
 #[test]
-fn stranger_cannot_request_a_shuffle() {
+fn stranger_cannot_submit_a_secret_or_request_a_shuffle() {
     let mut s = delegated();
     let stranger = Keypair::new();
     s.svm.airdrop(&stranger.pubkey(), 1_000_000_000).unwrap();
+    let hand = s.hand_creator;
+    assert!(!submit_secret_to(&mut s, &stranger, hand, [3; 32]));
+    both_secrets(&mut s);
     assert!(!request_shuffle(&mut s, &stranger));
 }
 
 #[test]
 fn nobody_can_call_the_callback_with_their_own_randomness() {
     let mut s = delegated();
+    both_secrets(&mut s);
     let attacker = s.creator.insecure_clone();
-    let deck = s.deck;
+    let (deck, hand_creator, hand_opponent) = (s.deck, s.hand_creator, s.hand_opponent);
 
     // Pretend to be the VRF program: wrong signer.
     assert!(!send(&mut s.svm, Ephemeral, &attacker, ix(
         instruction::CallbackShuffle { randomness: [0u8; 32] },
-        accounts::CallbackShuffle { deck, vrf_program_identity: key(&attacker) },
+        accounts::CallbackShuffle { deck, hand_creator, hand_opponent, vrf_program_identity: key(&attacker) },
     )));
-    // Name the real VRF identity: it can't sign, so the transaction can't be built
-    // with it as a signer. Sending it unsigned must fail too.
+    // Name the real VRF identity without its signature: must fail too.
     let mut forged = ix(
         instruction::CallbackShuffle { randomness: [0u8; 32] },
-        accounts::CallbackShuffle { deck, vrf_program_identity: scoped_vrf_identity(&rival_river::id()) },
+        accounts::CallbackShuffle {
+            deck,
+            hand_creator,
+            hand_opponent,
+            vrf_program_identity: scoped_vrf_identity(&rival_river::id()),
+        },
     );
     let identity = addr(scoped_vrf_identity(&rival_river::id()));
     forged.accounts.iter_mut().filter(|m| m.pubkey == identity).for_each(|m| m.is_signer = false);
     assert!(!send(&mut s.svm, Ephemeral, &attacker, forged));
     assert!(!read_deck(&s.svm, Ephemeral, s.deck).shuffled);
+    assert!(!read_hand(&s.svm, Ephemeral, s.hand_creator).dealt);
 }
 
 // ---- Private accounts: permissions ------------------------------------------

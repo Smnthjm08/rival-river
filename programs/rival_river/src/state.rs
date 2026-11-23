@@ -57,6 +57,10 @@ pub struct Deck {
     pub cards: [u8; 52],
     /// Set by the VRF callback; cleared when a new shuffle is requested.
     pub shuffled: bool,
+    /// A shuffle was requested and the VRF callback hasn't arrived yet.
+    pub pending: bool,
+    /// Index of the next card to deal from `cards` (hole cards use 0..4).
+    pub next: u8,
     pub bump: u8,
 }
 

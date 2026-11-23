@@ -19,6 +19,8 @@ declare_id!("7XjxcXUqsLRzXWxdVa2TR2jmHXzNrTW1Z7neQGYii1gi");
 pub mod rival_river {
     use super::*;
 
+    // ---- Solana (base layer): instructions/base/ ----
+
     pub fn create_table(
         ctx: Context<CreateTable>,
         table_id: u64,
@@ -36,6 +38,8 @@ pub mod rival_river {
         delegate_game::delegate_game_handler(ctx)
     }
 
+    // ---- Private ephemeral rollup: instructions/rollup/ ----
+
     pub fn init_permissions(ctx: Context<InitPermissions>) -> Result<()> {
         init_permissions::init_permissions_handler(ctx)
     }
@@ -46,6 +50,10 @@ pub mod rival_river {
 
     pub fn undelegate_game(ctx: Context<UndelegateGame>) -> Result<()> {
         undelegate_game::undelegate_game_handler(ctx)
+    }
+
+    pub fn submit_secret(ctx: Context<SubmitSecret>, secret: [u8; 32]) -> Result<()> {
+        submit_secret::submit_secret_handler(ctx, secret)
     }
 
     pub fn request_shuffle(ctx: Context<RequestShuffle>) -> Result<()> {

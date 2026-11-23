@@ -4,10 +4,12 @@ pub mod callback_shuffle;
 pub mod init_permissions;
 pub mod next_hand;
 pub mod request_shuffle;
+pub mod submit_secret;
 pub mod undelegate_game;
 
 pub use callback_shuffle::*;
 pub use init_permissions::*;
 pub use next_hand::*;
 pub use request_shuffle::*;
+pub use submit_secret::*;
 pub use undelegate_game::*;
