@@ -39,6 +39,9 @@ pub enum TableStatus {
 #[derive(InitSpace)]
 pub struct Game {
     pub table: Pubkey,
+    /// [creator, opponent], copied from the Table so instructions running on
+    /// the rollup can check who's playing without reading the Table on Solana.
+    pub players: [Pubkey; 2],
     pub hand_number: u8,
     pub bump: u8,
 }

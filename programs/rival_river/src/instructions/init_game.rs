@@ -27,8 +27,10 @@ pub struct InitGame<'info> {
 /// Creates the match-state account on Solana. It gets delegated to the
 /// rollup later; one game per table, enforced by the PDA seeds.
 pub fn init_game_handler(ctx: Context<InitGame>) -> Result<()> {
+    let table = &ctx.accounts.table;
     ctx.accounts.game.set_inner(Game {
-        table: ctx.accounts.table.key(),
+        table: table.key(),
+        players: [table.creator, table.opponent],
         hand_number: 0,
         bump: ctx.bumps.game,
     });
