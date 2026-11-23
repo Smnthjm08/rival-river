@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 
+use crate::constants::GAME_SEED;
 use crate::error::ErrorCode;
 use crate::state::Game;
 
@@ -11,7 +12,7 @@ pub struct NextHand<'info> {
     #[account(constraint = game.players.contains(&player.key()) @ ErrorCode::NotAPlayer)]
     pub player: Signer<'info>,
 
-    #[account(mut, seeds = [b"game", game.table.as_ref()], bump = game.bump)]
+    #[account(mut, seeds = [GAME_SEED, game.table.as_ref()], bump = game.bump)]
     pub game: Account<'info, Game>,
 }
 

@@ -2,6 +2,7 @@ use anchor_lang::prelude::*;
 use ephemeral_rollups_sdk::anchor::commit;
 use ephemeral_rollups_sdk::ephem::{FoldableIntentBuilder, MagicIntentBundleBuilder};
 
+use crate::constants::{DECK_SEED, GAME_SEED, HAND_SEED};
 use crate::error::ErrorCode;
 use crate::state::{Deck, Game, Hand};
 
@@ -16,17 +17,17 @@ pub struct UndelegateGame<'info> {
     )]
     pub payer: Signer<'info>,
 
-    #[account(mut, seeds = [b"game", game.table.as_ref()], bump = game.bump)]
+    #[account(mut, seeds = [GAME_SEED, game.table.as_ref()], bump = game.bump)]
     pub game: Account<'info, Game>,
 
-    #[account(mut, seeds = [b"deck", game.key().as_ref()], bump = deck.bump)]
+    #[account(mut, seeds = [DECK_SEED, game.key().as_ref()], bump = deck.bump)]
     pub deck: Account<'info, Deck>,
 
-    #[account(mut, seeds = [b"hand", game.key().as_ref(), game.players[0].as_ref()],
+    #[account(mut, seeds = [HAND_SEED, game.key().as_ref(), game.players[0].as_ref()],
               bump = hand_creator.bump)]
     pub hand_creator: Account<'info, Hand>,
 
-    #[account(mut, seeds = [b"hand", game.key().as_ref(), game.players[1].as_ref()],
+    #[account(mut, seeds = [HAND_SEED, game.key().as_ref(), game.players[1].as_ref()],
               bump = hand_opponent.bump)]
     pub hand_opponent: Account<'info, Hand>,
 }

@@ -7,6 +7,7 @@ use ephemeral_rollups_sdk::vrf::instructions::{
 };
 use ephemeral_rollups_sdk::vrf::types::SerializableAccountMeta;
 
+use crate::constants::{DECK_SEED, GAME_SEED};
 use crate::error::ErrorCode;
 use crate::state::{Deck, Game};
 
@@ -18,10 +19,10 @@ pub struct RequestShuffle<'info> {
     #[account(mut, constraint = game.players.contains(&player.key()) @ ErrorCode::NotAPlayer)]
     pub player: Signer<'info>,
 
-    #[account(seeds = [b"game", game.table.as_ref()], bump = game.bump)]
+    #[account(seeds = [GAME_SEED, game.table.as_ref()], bump = game.bump)]
     pub game: Account<'info, Game>,
 
-    #[account(mut, seeds = [b"deck", game.key().as_ref()], bump = deck.bump)]
+    #[account(mut, seeds = [DECK_SEED, game.key().as_ref()], bump = deck.bump)]
     pub deck: Account<'info, Deck>,
 
     /// CHECK: pinned to MagicBlock's rollup oracle queue, so a player can't

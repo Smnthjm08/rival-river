@@ -5,6 +5,7 @@ use {
     },
     litesvm::LiteSVM,
     rival_river::state::{Deck, Game, Hand, Table},
+    rival_river::constants::{DECK_SEED, GAME_SEED, HAND_SEED, TABLE_SEED},
     solana_keypair::Keypair,
     solana_message::{Message, VersionedMessage},
     solana_signer::Signer,
@@ -34,7 +35,7 @@ fn send(svm: &mut LiteSVM, signer: &Keypair, ix: Instruction) -> bool {
 
 /// Creates table #1 for `creator` and returns its address.
 fn create_table(svm: &mut LiteSVM, creator: &Keypair) -> Pubkey {
-    let table = pda(&[b"table", creator.pubkey().as_ref(), &1u64.to_le_bytes()]);
+    let table = pda(&[TABLE_SEED, creator.pubkey().as_ref(), &1u64.to_le_bytes()]);
     let ix = Instruction::new_with_bytes(
         rival_river::id(),
         &rival_river::instruction::CreateTable {
@@ -60,7 +61,7 @@ fn read_table(svm: &LiteSVM, table: Pubkey) -> Table {
 
 fn init_game(svm: &mut LiteSVM, signer: &Keypair, table: Pubkey) -> bool {
     let t = read_table(svm, table);
-    let game = pda(&[b"game", table.as_ref()]);
+    let game = pda(&[GAME_SEED, table.as_ref()]);
     let ix = Instruction::new_with_bytes(
         rival_river::id(),
         &rival_river::instruction::InitGame {}.data(),
@@ -68,9 +69,9 @@ fn init_game(svm: &mut LiteSVM, signer: &Keypair, table: Pubkey) -> bool {
             creator: signer.pubkey(),
             table,
             game,
-            deck: pda(&[b"deck", game.as_ref()]),
-            hand_creator: pda(&[b"hand", game.as_ref(), t.creator.as_ref()]),
-            hand_opponent: pda(&[b"hand", game.as_ref(), t.opponent.as_ref()]),
+            deck: pda(&[DECK_SEED, game.as_ref()]),
+            hand_creator: pda(&[HAND_SEED, game.as_ref(), t.creator.as_ref()]),
+            hand_opponent: pda(&[HAND_SEED, game.as_ref(), t.opponent.as_ref()]),
             system_program: anchor_lang::system_program::ID,
         }
         .to_account_metas(None),
@@ -85,14 +86,14 @@ fn creator_opens_game_for_their_table() {
 
     assert!(init_game(&mut svm, &creator, table));
 
-    let game_key = pda(&[b"game", table.as_ref()]);
+    let game_key = pda(&[GAME_SEED, table.as_ref()]);
     let account = svm.get_account(&game_key).unwrap();
     assert_eq!(account.owner, rival_river::id());
     let game = Game::try_deserialize(&mut account.data.as_slice()).unwrap();
     assert_eq!(game.table, table);
     assert_eq!(game.hand_number, 0);
 
-    let account = svm.get_account(&pda(&[b"deck", game_key.as_ref()])).unwrap();
+    let account = svm.get_account(&pda(&[DECK_SEED, game_key.as_ref()])).unwrap();
     let deck = Deck::try_deserialize(&mut account.data.as_slice()).unwrap();
     assert_eq!(deck.game, game_key);
     assert!(!deck.shuffled);
@@ -100,7 +101,7 @@ fn creator_opens_game_for_their_table() {
     // One empty Hand per player.
     let t = read_table(&svm, table);
     for player in [t.creator, t.opponent] {
-        let account = svm.get_account(&pda(&[b"hand", game_key.as_ref(), player.as_ref()])).unwrap();
+        let account = svm.get_account(&pda(&[HAND_SEED, game_key.as_ref(), player.as_ref()])).unwrap();
         let hand = Hand::try_deserialize(&mut account.data.as_slice()).unwrap();
         assert_eq!((hand.game, hand.player), (game_key, player));
         assert!(!hand.dealt && !hand.has_secret);

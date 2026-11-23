@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 
+use crate::constants::TABLE_SEED;
 use crate::error::ErrorCode;
 use crate::state::{Table, TableStatus};
 
@@ -13,7 +14,7 @@ pub struct CreateTable<'info> {
         init,
         payer = creator,
         space = 8 + Table::INIT_SPACE,
-        seeds = [b"table", creator.key().as_ref(), &table_id.to_le_bytes()],
+        seeds = [TABLE_SEED, creator.key().as_ref(), &table_id.to_le_bytes()],
         bump,
     )]
     pub table: Account<'info, Table>,

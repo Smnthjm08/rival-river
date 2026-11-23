@@ -13,7 +13,7 @@ use {
         },
     },
     magicsvm::{MagicSVM, TransactionTarget::{self, Base, Ephemeral}},
-    rival_river::{accounts, instruction, state::Game},
+    rival_river::{accounts, constants::{DECK_SEED, GAME_SEED, HAND_SEED, TABLE_SEED}, instruction, state::Game},
     solana_address::Address,
     solana_compute_budget_interface::ComputeBudgetInstruction,
     solana_instruction::{AccountMeta, Instruction},
@@ -91,11 +91,11 @@ fn setup() -> Setup {
     for k in [&creator, &opponent] {
         svm.airdrop(&k.pubkey(), 2_000_000_000).unwrap();
     }
-    let table = pda(&[b"table", key(&creator).as_ref(), &1u64.to_le_bytes()]);
-    let game = pda(&[b"game", table.as_ref()]);
-    let deck = pda(&[b"deck", game.as_ref()]);
-    let hand_creator = pda(&[b"hand", game.as_ref(), key(&creator).as_ref()]);
-    let hand_opponent = pda(&[b"hand", game.as_ref(), key(&opponent).as_ref()]);
+    let table = pda(&[TABLE_SEED, key(&creator).as_ref(), &1u64.to_le_bytes()]);
+    let game = pda(&[GAME_SEED, table.as_ref()]);
+    let deck = pda(&[DECK_SEED, game.as_ref()]);
+    let hand_creator = pda(&[HAND_SEED, game.as_ref(), key(&creator).as_ref()]);
+    let hand_opponent = pda(&[HAND_SEED, game.as_ref(), key(&opponent).as_ref()]);
     assert!(send(&mut svm, Base, &creator, ix(
         instruction::CreateTable { table_id: 1, opponent: key(&opponent), creator_nft: Pubkey::new_unique() },
         accounts::CreateTable { creator: key(&creator), table, system_program: system_program::ID },

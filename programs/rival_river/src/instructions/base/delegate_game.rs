@@ -2,6 +2,7 @@ use anchor_lang::prelude::*;
 use ephemeral_rollups_sdk::anchor::delegate;
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
 
+use crate::constants::{DECK_SEED, GAME_SEED, HAND_SEED};
 use crate::error::ErrorCode;
 use crate::state::Table;
 
@@ -24,21 +25,21 @@ pub struct DelegateGame<'info> {
     /// CHECK: the Game PDA for this table. Seeds pin its address; `owner`
     /// makes sure init_game already ran. After this instruction the
     /// delegation program owns it on Solana and the rollup holds a copy.
-    #[account(mut, del, owner = crate::ID, seeds = [b"game", table.key().as_ref()], bump)]
+    #[account(mut, del, owner = crate::ID, seeds = [GAME_SEED, table.key().as_ref()], bump)]
     pub game: UncheckedAccount<'info>,
 
     /// CHECK: the Deck PDA for this game; same checks as `game`.
-    #[account(mut, del, owner = crate::ID, seeds = [b"deck", game.key().as_ref()], bump)]
+    #[account(mut, del, owner = crate::ID, seeds = [DECK_SEED, game.key().as_ref()], bump)]
     pub deck: UncheckedAccount<'info>,
 
     /// CHECK: the creator's Hand PDA; same checks as `game`.
     #[account(mut, del, owner = crate::ID,
-              seeds = [b"hand", game.key().as_ref(), table.creator.as_ref()], bump)]
+              seeds = [HAND_SEED, game.key().as_ref(), table.creator.as_ref()], bump)]
     pub hand_creator: UncheckedAccount<'info>,
 
     /// CHECK: the opponent's Hand PDA; same checks as `game`.
     #[account(mut, del, owner = crate::ID,
-              seeds = [b"hand", game.key().as_ref(), table.opponent.as_ref()], bump)]
+              seeds = [HAND_SEED, game.key().as_ref(), table.opponent.as_ref()], bump)]
     pub hand_opponent: UncheckedAccount<'info>,
 }
 
@@ -54,22 +55,22 @@ pub fn delegate_game_handler(ctx: Context<DelegateGame>) -> Result<()> {
 
     ctx.accounts.delegate_game(
         &ctx.accounts.payer,
-        &[b"game", table.as_ref()],
+        &[GAME_SEED, table.as_ref()],
         DelegateConfig { validator, ..Default::default() },
     )?;
     ctx.accounts.delegate_deck(
         &ctx.accounts.payer,
-        &[b"deck", game.as_ref()],
+        &[DECK_SEED, game.as_ref()],
         DelegateConfig { validator, ..Default::default() },
     )?;
     ctx.accounts.delegate_hand_creator(
         &ctx.accounts.payer,
-        &[b"hand", game.as_ref(), creator.as_ref()],
+        &[HAND_SEED, game.as_ref(), creator.as_ref()],
         DelegateConfig { validator, ..Default::default() },
     )?;
     ctx.accounts.delegate_hand_opponent(
         &ctx.accounts.payer,
-        &[b"hand", game.as_ref(), opponent.as_ref()],
+        &[HAND_SEED, game.as_ref(), opponent.as_ref()],
         DelegateConfig { validator, ..Default::default() },
     )?;
     Ok(())

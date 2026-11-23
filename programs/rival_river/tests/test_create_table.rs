@@ -5,6 +5,7 @@ use {
     },
     litesvm::LiteSVM,
     rival_river::state::{Table, TableStatus},
+    rival_river::constants::TABLE_SEED,
     solana_keypair::Keypair,
     solana_message::{Message, VersionedMessage},
     solana_signer::Signer,
@@ -22,7 +23,7 @@ fn setup() -> (LiteSVM, Keypair) {
 
 fn table_pda(creator: &Pubkey, table_id: u64) -> Pubkey {
     Pubkey::find_program_address(
-        &[b"table", creator.as_ref(), &table_id.to_le_bytes()],
+        &[TABLE_SEED, creator.as_ref(), &table_id.to_le_bytes()],
         &rival_river::id(),
     )
     .0

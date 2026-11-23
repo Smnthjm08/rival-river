@@ -5,6 +5,7 @@ use ephemeral_rollups_sdk::access_control::structs::{
 };
 use ephemeral_rollups_sdk::consts::{EPHEMERAL_VAULT_ID, MAGIC_PROGRAM_ID, PERMISSION_PROGRAM_ID};
 
+use crate::constants::{DECK_SEED, GAME_SEED, HAND_SEED};
 use crate::error::ErrorCode;
 use crate::state::{Deck, Game, Hand};
 
@@ -22,17 +23,17 @@ pub struct InitPermissions<'info> {
     #[account(mut, constraint = game.players.contains(&payer.key()) @ ErrorCode::NotAPlayer)]
     pub payer: Signer<'info>,
 
-    #[account(mut, seeds = [b"game", game.table.as_ref()], bump = game.bump)]
+    #[account(mut, seeds = [GAME_SEED, game.table.as_ref()], bump = game.bump)]
     pub game: Account<'info, Game>,
 
-    #[account(mut, seeds = [b"deck", game.key().as_ref()], bump = deck.bump)]
+    #[account(mut, seeds = [DECK_SEED, game.key().as_ref()], bump = deck.bump)]
     pub deck: Account<'info, Deck>,
 
-    #[account(mut, seeds = [b"hand", game.key().as_ref(), game.players[0].as_ref()],
+    #[account(mut, seeds = [HAND_SEED, game.key().as_ref(), game.players[0].as_ref()],
               bump = hand_creator.bump)]
     pub hand_creator: Account<'info, Hand>,
 
-    #[account(mut, seeds = [b"hand", game.key().as_ref(), game.players[1].as_ref()],
+    #[account(mut, seeds = [HAND_SEED, game.key().as_ref(), game.players[1].as_ref()],
               bump = hand_opponent.bump)]
     pub hand_opponent: Account<'info, Hand>,
 
@@ -82,25 +83,25 @@ pub fn init_permissions_handler(ctx: Context<InitPermissions>) -> Result<()> {
         (
             a.game.to_account_info(),
             a.game_permission.to_account_info(),
-            &[b"game", a.game.table.as_ref(), &game_bump],
+            &[GAME_SEED, a.game.table.as_ref(), &game_bump],
             vec![reader(creator), reader(opponent)],
         ),
         (
             a.deck.to_account_info(),
             a.deck_permission.to_account_info(),
-            &[b"deck", game_key.as_ref(), &deck_bump],
+            &[DECK_SEED, game_key.as_ref(), &deck_bump],
             vec![],
         ),
         (
             a.hand_creator.to_account_info(),
             a.hand_creator_permission.to_account_info(),
-            &[b"hand", game_key.as_ref(), creator.as_ref(), &creator_bump],
+            &[HAND_SEED, game_key.as_ref(), creator.as_ref(), &creator_bump],
             vec![reader(creator)],
         ),
         (
             a.hand_opponent.to_account_info(),
             a.hand_opponent_permission.to_account_info(),
-            &[b"hand", game_key.as_ref(), opponent.as_ref(), &opponent_bump],
+            &[HAND_SEED, game_key.as_ref(), opponent.as_ref(), &opponent_bump],
             vec![reader(opponent)],
         ),
     ];

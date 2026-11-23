@@ -3,7 +3,7 @@ use anchor_lang::system_program::{transfer, Transfer};
 use ephemeral_rollups_sdk::access_control::structs::EphemeralPermission;
 use ephemeral_rollups_sdk::ephemeral_accounts::rent;
 
-use crate::constants::MAX_PERMISSION_MEMBERS;
+use crate::constants::{DECK_SEED, GAME_SEED, HAND_SEED, MAX_PERMISSION_MEMBERS};
 use crate::state::{Deck, Game, Hand, Table};
 
 #[derive(Accounts)]
@@ -20,7 +20,7 @@ pub struct InitGame<'info> {
         init,
         payer = creator,
         space = 8 + Game::INIT_SPACE,
-        seeds = [b"game", table.key().as_ref()],
+        seeds = [GAME_SEED, table.key().as_ref()],
         bump,
     )]
     pub game: Account<'info, Game>,
@@ -29,7 +29,7 @@ pub struct InitGame<'info> {
         init,
         payer = creator,
         space = 8 + Deck::INIT_SPACE,
-        seeds = [b"deck", game.key().as_ref()],
+        seeds = [DECK_SEED, game.key().as_ref()],
         bump,
     )]
     pub deck: Account<'info, Deck>,
@@ -38,7 +38,7 @@ pub struct InitGame<'info> {
         init,
         payer = creator,
         space = 8 + Hand::INIT_SPACE,
-        seeds = [b"hand", game.key().as_ref(), table.creator.as_ref()],
+        seeds = [HAND_SEED, game.key().as_ref(), table.creator.as_ref()],
         bump,
     )]
     pub hand_creator: Account<'info, Hand>,
@@ -47,7 +47,7 @@ pub struct InitGame<'info> {
         init,
         payer = creator,
         space = 8 + Hand::INIT_SPACE,
-        seeds = [b"hand", game.key().as_ref(), table.opponent.as_ref()],
+        seeds = [HAND_SEED, game.key().as_ref(), table.opponent.as_ref()],
         bump,
     )]
     pub hand_opponent: Account<'info, Hand>,
