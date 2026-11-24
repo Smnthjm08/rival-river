@@ -41,6 +41,15 @@ pub fn balance(svm: &LiteSVM, account: Pubkey) -> u64 {
 
 fn write(svm: &mut LiteSVM, address: Pubkey, data: Vec<u8>) {
     let lamports = svm.minimum_balance_for_rent_exemption(data.len());
-    svm.set_account(address, Account { lamports, data, owner: token::ID, executable: false, rent_epoch: 0 })
-        .unwrap();
+    svm.set_account(
+        address,
+        Account {
+            lamports,
+            data,
+            owner: token::ID,
+            executable: false,
+            rent_epoch: 0,
+        },
+    )
+    .unwrap();
 }

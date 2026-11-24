@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-use crate::constants::{BLINDS, DECK_SEED, GAME_SEED, HAND_SEED, MAX_HANDS};
+use crate::constants::{BLINDS, DECK_SEED, GAME_SEED, HAND_SEED, MAX_HANDS, TURN_SECONDS};
 use crate::error::ErrorCode;
 use crate::poker;
 use crate::state::{Deck, Game, Hand, Phase};
@@ -14,7 +14,9 @@ pub enum Action {
     /// Match the other player's bet, or go all-in if you can't.
     Call,
     /// Bet (nothing to call) or raise, so that your bet this street totals `to`.
-    Raise { to: u16 },
+    Raise {
+        to: u16,
+    },
 }
 
 /// Runs on the rollup during a betting round. Takes the deck to deal the
@@ -46,16 +48,33 @@ pub struct Act<'info> {
 
 pub fn act_handler(ctx: Context<Act>, action: Action) -> Result<()> {
     let a = ctx.accounts;
-    let game = &mut a.game;
+    apply(
+        &mut a.game,
+        &a.deck,
+        [&a.hand_creator, &a.hand_opponent],
+        action,
+    )
+}
+
+/// On timeout: check if possible, else fold.
+pub(crate) fn timeout_action(game: &Game) -> Action {
+    let me = game.to_act as usize;
+    if game.bets[1 - me] > game.bets[me] {
+        Action::Fold
+    } else {
+        Action::Check
+    }
+}
+
+/// `game.to_act` takes `action`; the caller has checked it's allowed.
+pub(crate) fn apply(game: &mut Game, deck: &Deck, hands: [&Hand; 2], action: Action) -> Result<()> {
     let me = game.to_act as usize;
     let other = 1 - me;
     let to_call = game.bets[other].saturating_sub(game.bets[me]);
 
     match action {
         Action::Fold => {
-            // The other player takes everything in the middle, their own bet included.
-            game.stacks[other] += game.pot + game.bets[0] + game.bets[1];
-            end_hand(game);
+            fold(game, me);
             return Ok(());
         }
         Action::Check => require!(to_call == 0, ErrorCode::CannotCheck),
@@ -86,11 +105,18 @@ pub fn act_handler(ctx: Context<Act>, action: Action) -> Result<()> {
     game.acted[me] = true;
 
     if street_over(game) {
-        end_street(game, &a.deck, [&a.hand_creator, &a.hand_opponent]);
+        end_street(game, deck, hands);
     } else {
         game.to_act = other as u8;
     }
+    game.deadline = Clock::get()?.unix_timestamp + TURN_SECONDS;
     Ok(())
+}
+
+/// The other player takes the pot and both bets.
+pub(crate) fn fold(game: &mut Game, folder: usize) {
+    game.stacks[1 - folder] += game.pot + game.bets[0] + game.bets[1];
+    end_hand(game);
 }
 
 fn put_in(game: &mut Game, player: usize, amount: u16) {
@@ -173,7 +199,11 @@ fn end_hand(game: &mut Game) {
     } else {
         None
     };
-    game.phase = if game.winner.is_some() { Phase::Finished } else { Phase::Waiting };
+    game.phase = if game.winner.is_some() {
+        Phase::Finished
+    } else {
+        Phase::Waiting
+    };
 }
 
 fn big_blind(hand_number: u8) -> u16 {

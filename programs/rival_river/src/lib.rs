@@ -47,6 +47,11 @@ pub mod rival_river {
         delegate_game::delegate_game_handler(ctx)
     }
 
+    /// After the table's deadline, if the match was never settled.
+    pub fn refund(ctx: Context<Refund>) -> Result<()> {
+        refund::refund_handler(ctx)
+    }
+
     /// After undelegate_game, once the match has a winner.
     pub fn settle(ctx: Context<Settle>) -> Result<()> {
         settle::settle_handler(ctx)
@@ -64,6 +69,10 @@ pub mod rival_river {
 
     pub fn act(ctx: Context<Act>, action: Action) -> Result<()> {
         act::act_handler(ctx, action)
+    }
+
+    pub fn claim_timeout(ctx: Context<ClaimTimeout>) -> Result<()> {
+        claim_timeout::claim_timeout_handler(ctx)
     }
 
     pub fn undelegate_game(ctx: Context<UndelegateGame>) -> Result<()> {

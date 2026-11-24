@@ -50,4 +50,12 @@ pub enum ErrorCode {
     NoShufflePending,
     #[msg("This randomness was requested for a different hand")]
     StaleShuffle,
+    #[msg("The match is over: settle it instead")]
+    MatchFinished,
+    #[msg("The deadline hasn't passed yet")]
+    NotTimedOut,
+    #[msg("The refund deadline hasn't passed yet")]
+    RefundTooEarly,
+    #[msg("Nothing to refund: the table was never joined, or is already settled or refunded")]
+    NothingToRefund,
 }

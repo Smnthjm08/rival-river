@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
+use crate::constants::MATCH_SECONDS;
 use crate::error::ErrorCode;
 use crate::escrow;
 use crate::state::{Table, TableStatus};
@@ -35,7 +36,16 @@ pub struct JoinTable<'info> {
 /// until the match is settled.
 pub fn join_table_handler(ctx: Context<JoinTable>) -> Result<()> {
     let a = &ctx.accounts;
-    escrow::deposit(&a.opponent, &a.opponent_token, &a.vault, &a.mint, &a.token_program, a.table.stake)?;
-    ctx.accounts.table.status = TableStatus::Locked;
+    escrow::deposit(
+        &a.opponent,
+        &a.opponent_token,
+        &a.vault,
+        &a.mint,
+        &a.token_program,
+        a.table.stake,
+    )?;
+    let table = &mut ctx.accounts.table;
+    table.status = TableStatus::Locked;
+    table.deadline = Clock::get()?.unix_timestamp + MATCH_SECONDS;
     Ok(())
 }

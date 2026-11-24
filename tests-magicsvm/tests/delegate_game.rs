@@ -202,6 +202,22 @@ fn init_game(s: &mut Setup) {
 }
 
 fn delegate_game(s: &mut Setup, signer: &Keypair) -> bool {
+    let ixs = delegate_game_ixs(s, signer);
+    send_ixs(&mut s.svm, Base, signer, &ixs)
+}
+
+/// The program's error name if the transaction fails, e.g. "MatchFinished".
+fn error_name(svm: &mut MagicSVM, target: TransactionTarget, signer: &Keypair, ixs: &[Instruction]) -> Option<String> {
+    let msg = Message::new(ixs, Some(&signer.pubkey()));
+    let tx = Transaction::new(&[signer], msg, svm.latest_blockhash_for(target));
+    let res = svm.send_transaction_to(target, tx);
+    svm.expire_blockhash_for(target);
+    let logs = res.err()?.meta.logs;
+    Some(logs.iter().find_map(|l| Some(l.split("Error Code: ").nth(1)?.split('.').next()?.to_string()))
+        .unwrap_or_else(|| format!("{logs:?}")))
+}
+
+fn delegate_game_ixs(s: &Setup, signer: &Keypair) -> Vec<Instruction> {
     let (table, game, deck) = (s.table, s.game, s.deck);
     let (hand_creator, hand_opponent) = (s.hand_creator, s.hand_opponent);
     let ix = ix(
@@ -233,7 +249,7 @@ fn delegate_game(s: &mut Setup, signer: &Keypair) -> bool {
     // Delegating 4 accounts can exceed the default 200k compute units, so the
     // client raises the limit (the frontend must do the same).
     let budget = ComputeBudgetInstruction::set_compute_unit_limit(400_000);
-    send_ixs(&mut s.svm, Base, signer, &[budget, ix])
+    vec![budget, ix]
 }
 
 #[test]
@@ -331,6 +347,12 @@ fn undelegate_game(s: &mut Setup, signer: &Keypair) -> bool {
             deck,
             hand_creator,
             hand_opponent,
+            game_permission: permission_of(game),
+            deck_permission: permission_of(deck),
+            hand_creator_permission: permission_of(hand_creator),
+            hand_opponent_permission: permission_of(hand_opponent),
+            permission_program: PERMISSION_PROGRAM_ID,
+            ephemeral_vault: EPHEMERAL_VAULT_ID,
             magic_program: MagicProgram::id(),
             magic_context: MAGIC_CONTEXT_ID,
         },
@@ -1041,11 +1063,15 @@ fn settle(s: &mut Setup, to: Pubkey) -> bool {
     let payer = Keypair::new();
     s.svm.airdrop(&payer.pubkey(), 1_000_000_000).unwrap();
     let (table, game, mint, creator) = (s.table, s.game, s.mint, key(&s.creator));
+    let (deck, hand_creator, hand_opponent) = (s.deck, s.hand_creator, s.hand_opponent);
     send(&mut s.svm, Base, &payer, ix(
         instruction::Settle {},
         accounts::Settle {
             table,
             game,
+            deck,
+            hand_creator,
+            hand_opponent,
             mint,
             winner_token: to,
             vault: ata(table, mint),
@@ -1102,7 +1128,14 @@ fn winner_takes_both_stakes() {
     assert!(undelegate_game(&mut s, &creator));
     assert_eq!(read_game(&s.svm, Base, s.game).winner, Some(winner as u8));
     assert!(!settle(&mut s, tokens[1 - winner]), "loser can't be paid");
+    let match_accounts = [s.game, s.deck, s.hand_creator, s.hand_opponent];
+    let rent: u64 = match_accounts.iter().map(|a| s.svm.get_balance(&addr(*a)).unwrap()).sum();
+    let creator_before = s.svm.get_balance(&creator.pubkey()).unwrap();
     assert!(settle(&mut s, tokens[winner]));
+    for a in match_accounts {
+        assert!(s.svm.get_account_for(Base, &addr(a)).map_or(true, |acc| acc.lamports == 0), "{a} not closed");
+    }
+    assert!(s.svm.get_balance(&creator.pubkey()).unwrap() >= creator_before + rent);
 
     assert_eq!(balance(&s.svm, tokens[winner]), Some(2 * STAKE));
     assert_eq!(balance(&s.svm, tokens[1 - winner]), Some(0));
@@ -1195,4 +1228,258 @@ fn answer_for_this_hand_deals() {
     let mut s = requested();
     assert!(oracle_answers(&mut s));
     assert_eq!(read_game(&s.svm, Ephemeral, s.game).phase, Phase::Preflop);
+}
+
+// ---- Delegation lifecycle -------------------------------------------------------
+
+/// private() played to the end with all-in hands: Phase::Finished on the rollup.
+fn finished() -> Setup {
+    let mut s = private();
+    let creator = s.creator.insecure_clone();
+    for _ in 0..10 {
+        play_all_in_hand(&mut s);
+        if read_game(&s.svm, Ephemeral, s.game).phase == Phase::Finished {
+            return s;
+        }
+        assert!(start_hand(&mut s, &creator));
+    }
+    panic!("nobody busted in 10 all-in hands");
+}
+
+#[test]
+fn finished_game_cannot_be_delegated_again() {
+    let mut s = finished();
+    let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    assert!(undelegate_game(&mut s, &creator));
+    // The loser tries to lock the game again before anyone settles.
+    for player in [&opponent, &creator] {
+        let ixs = delegate_game_ixs(&s, player);
+        assert_eq!(error_name(&mut s.svm, Base, player, &ixs).as_deref(), Some("MatchFinished"));
+    }
+    assert_eq!(owner(&s.svm, Base, s.game), rival_river::id(), "still settleable");
+}
+
+#[test]
+fn settled_table_cannot_be_delegated() {
+    let mut s = finished();
+    let creator = s.creator.insecure_clone();
+    assert!(undelegate_game(&mut s, &creator));
+    let winner = read_game(&s.svm, Base, s.game).winner.unwrap() as usize;
+    let winner_token = ata([key(&s.creator), key(&s.opponent)][winner], s.mint);
+    assert!(settle(&mut s, winner_token));
+    let ixs = delegate_game_ixs(&s, &creator);
+    assert_eq!(error_name(&mut s.svm, Base, &creator, &ixs).as_deref(), Some("TableNotInPlay"));
+}
+
+#[test]
+fn undelegate_closes_the_permissions_and_refunds_their_rent() {
+    let mut s = setup();
+    init_game(&mut s);
+    let accounts = [s.game, s.deck, s.hand_creator, s.hand_opponent];
+    let funded = accounts.map(|a| s.svm.get_balance(&addr(a)).unwrap());
+    let creator = s.creator.insecure_clone();
+    assert!(delegate_game(&mut s, &creator));
+    assert!(init_permissions(&mut s, &creator));
+    for a in accounts {
+        assert!(s.svm.get_account_for(Ephemeral, &addr(permission_of(a))).is_some());
+    }
+
+    assert!(undelegate_game(&mut s, &creator));
+    for a in accounts {
+        let p = s.svm.ephemeral().get_account(&addr(permission_of(a)));
+        assert!(p.map_or(true, |p| p.lamports == 0), "permission of {a} still open");
+    }
+    assert_eq!(accounts.map(|a| s.svm.get_balance(&addr(a)).unwrap()), funded);
+}
+
+#[test]
+fn undelegate_before_permissions_exist_still_works() {
+    let mut s = delegated(); // no init_permissions
+    let creator = s.creator.insecure_clone();
+    assert!(undelegate_game(&mut s, &creator));
+    assert_eq!(owner(&s.svm, Base, s.game), rival_river::id());
+}
+
+#[test]
+fn delegation_never_commits_on_a_timer() {
+    use ephemeral_rollups_sdk::pda::delegation_record_pda_from_delegated_account;
+    let s = delegated();
+    for a in [s.game, s.deck, s.hand_creator, s.hand_opponent] {
+        let record = s.svm.get_account_for(Base, &addr(delegation_record_pda_from_delegated_account(&a))).unwrap();
+        // commit_frequency_ms: after discriminator, 2 pubkeys and 2 u64s.
+        let freq = u64::from_le_bytes(record.data[8 + 32 + 32 + 8 + 8..][..8].try_into().unwrap());
+        assert_eq!(freq, u32::MAX as u64, "{a} would be committed periodically");
+    }
+}
+
+// ---- Turn timer (rollup) and refund deadline (Solana) ----------------------------
+
+use rival_river::constants::{MATCH_SECONDS, TURN_SECONDS};
+
+fn advance_clock(s: &mut Setup, seconds: i64) {
+    let mut clock = s.svm.get_sysvar::<Clock>();
+    clock.unix_timestamp += seconds;
+    s.svm.set_sysvar(&clock);
+}
+
+fn now(s: &Setup) -> i64 {
+    s.svm.get_sysvar::<Clock>().unix_timestamp
+}
+
+fn claim_timeout_ix(s: &Setup, signer: &Keypair) -> Instruction {
+    ix(
+        instruction::ClaimTimeout {},
+        accounts::ClaimTimeout {
+            player: key(signer),
+            game: s.game,
+            deck: s.deck,
+            hand_creator: s.hand_creator,
+            hand_opponent: s.hand_opponent,
+        },
+    )
+}
+
+/// None if it succeeded, else the program's error name.
+fn claim_timeout(s: &mut Setup, signer: &Keypair) -> Option<String> {
+    let ix = claim_timeout_ix(s, signer);
+    error_name(&mut s.svm, Ephemeral, signer, &[ix])
+}
+
+#[test]
+fn timeout_needs_the_deadline_to_pass() {
+    let mut s = preflop();
+    let opponent = s.opponent.insecure_clone();
+    assert_eq!(claim_timeout(&mut s, &opponent).as_deref(), Some("NotTimedOut"));
+    advance_clock(&mut s, TURN_SECONDS);
+    assert_eq!(claim_timeout(&mut s, &opponent).as_deref(), Some("NotTimedOut"), "deadline itself is still in time");
+}
+
+#[test]
+fn timed_out_player_facing_a_bet_folds() {
+    let mut s = preflop();
+    let opponent = s.opponent.insecure_clone();
+    advance_clock(&mut s, TURN_SECONDS + 1);
+    assert_eq!(claim_timeout(&mut s, &opponent), None);
+    let g = read_game(&s.svm, Ephemeral, s.game);
+    assert_eq!((g.phase, g.stacks), (Phase::Waiting, [95, 105]));
+}
+
+#[test]
+fn timed_out_player_who_can_check_checks() {
+    let mut s = preflop();
+    let creator = s.creator.insecure_clone();
+    assert!(act(&mut s, &creator, Action::Call));
+    advance_clock(&mut s, TURN_SECONDS + 1);
+    assert_eq!(claim_timeout(&mut s, &creator), None);
+    let g = read_game(&s.svm, Ephemeral, s.game);
+    assert_eq!((g.phase, g.pot, g.to_act), (Phase::Flop, 20, 1));
+    assert_eq!(g.deadline, now(&s) + TURN_SECONDS, "the flop gets a fresh clock");
+}
+
+#[test]
+fn each_action_restarts_the_clock() {
+    let mut s = preflop();
+    let creator = s.creator.insecure_clone();
+    advance_clock(&mut s, TURN_SECONDS - 5);
+    assert!(act(&mut s, &creator, Action::Call)); // just in time
+    advance_clock(&mut s, TURN_SECONDS - 5);
+    assert_eq!(claim_timeout(&mut s, &creator).as_deref(), Some("NotTimedOut"));
+    advance_clock(&mut s, 10);
+    assert_eq!(claim_timeout(&mut s, &creator), None);
+}
+
+#[test]
+fn missing_secret_forfeits_the_hand() {
+    let mut s = private(); // hand 1 Dealing: creator posted 5, opponent 10
+    let creator = s.creator.insecure_clone();
+    assert!(submit_secret(&mut s, &creator, [1; 32]));
+    advance_clock(&mut s, TURN_SECONDS + 1);
+    assert_eq!(claim_timeout(&mut s, &creator), None);
+    let g = read_game(&s.svm, Ephemeral, s.game);
+    assert_eq!((g.phase, g.stacks), (Phase::Waiting, [110, 90]), "opponent forfeits their blind");
+}
+
+#[test]
+fn nobody_can_claim_while_both_stall() {
+    let mut s = private();
+    let creator = s.creator.insecure_clone();
+    advance_clock(&mut s, TURN_SECONDS + 1);
+    assert_eq!(claim_timeout(&mut s, &creator).as_deref(), Some("SecretsMissing"));
+}
+
+#[test]
+fn stuck_shuffle_can_be_requested_again() {
+    let mut s = private();
+    let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    both_secrets(&mut s);
+    assert!(request_shuffle(&mut s, &creator));
+    assert_eq!(claim_timeout(&mut s, &opponent).as_deref(), Some("NotTimedOut"));
+    advance_clock(&mut s, TURN_SECONDS + 1); // the oracle hasn't answered (no slot passed)
+    assert_eq!(claim_timeout(&mut s, &opponent), None);
+    assert!(!read_deck(&s.svm, Ephemeral, s.deck).pending);
+    assert!(request_shuffle(&mut s, &opponent));
+
+    // Both answers arrive: the first deals, the second is refused.
+    let slot = s.svm.get_sysvar::<Clock>().slot;
+    let results = s.svm.warp_to_slot(slot + 1);
+    assert_eq!(results.iter().map(|r| r.is_ok()).collect::<Vec<_>>(), vec![true, false]);
+    assert_eq!(read_game(&s.svm, Ephemeral, s.game).phase, Phase::Preflop);
+}
+
+#[test]
+fn waiting_and_finished_have_no_timeout() {
+    let mut s = delegated(); // Waiting
+    let creator = s.creator.insecure_clone();
+    advance_clock(&mut s, TURN_SECONDS + 1);
+    assert_eq!(claim_timeout(&mut s, &creator).as_deref(), Some("NotTimedOut"));
+    let mut s = finished();
+    let creator = s.creator.insecure_clone();
+    advance_clock(&mut s, TURN_SECONDS + 1);
+    assert_eq!(claim_timeout(&mut s, &creator).as_deref(), Some("NotTimedOut"));
+}
+
+fn refund(s: &mut Setup) -> Option<String> {
+    let payer = Keypair::new();
+    s.svm.airdrop(&payer.pubkey(), 1_000_000_000).unwrap();
+    let ix = ix(
+        instruction::Refund {},
+        accounts::Refund {
+            table: s.table,
+            game: s.game,
+            mint: s.mint,
+            creator_token: ata(key(&s.creator), s.mint),
+            opponent_token: ata(key(&s.opponent), s.mint),
+            vault: ata(s.table, s.mint),
+            creator: key(&s.creator),
+            token_program: token_program(),
+        },
+    );
+    error_name(&mut s.svm, Base, &payer, &[ix])
+}
+
+#[test]
+fn stakes_come_back_if_the_rollup_never_returns_the_game() {
+    let mut s = preflop(); // mid-hand, still delegated
+    assert_eq!(refund(&mut s).as_deref(), Some("RefundTooEarly"));
+    advance_clock(&mut s, MATCH_SECONDS + 1);
+    assert_eq!(refund(&mut s), None);
+    let tokens = [key(&s.creator), key(&s.opponent)].map(|p| ata(p, s.mint));
+    assert_eq!(tokens.map(|t| balance(&s.svm, t)), [Some(STAKE), Some(STAKE)]);
+    assert_eq!(balance(&s.svm, ata(s.table, s.mint)), None, "vault closed");
+    assert_eq!(read_table(&s.svm, s.table).status, TableStatus::Refunded);
+    assert!(refund(&mut s).is_some(), "only once");
+}
+
+#[test]
+fn finished_match_is_settled_not_refunded() {
+    let mut s = finished();
+    let creator = s.creator.insecure_clone();
+    assert!(undelegate_game(&mut s, &creator));
+    advance_clock(&mut s, MATCH_SECONDS + 1);
+    // The loser can't wait out the deadline to get their stake back.
+    assert_eq!(refund(&mut s).as_deref(), Some("MatchFinished"));
+    let winner = read_game(&s.svm, Base, s.game).winner.unwrap() as usize;
+    let winner_token = ata([key(&s.creator), key(&s.opponent)][winner], s.mint);
+    assert!(settle(&mut s, winner_token));
+    assert!(refund(&mut s).is_some(), "settled tables can't be refunded");
 }

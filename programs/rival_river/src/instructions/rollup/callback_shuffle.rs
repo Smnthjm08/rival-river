@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 use ephemeral_rollups_sdk::anchor::vrf_callback;
 
+use crate::constants::TURN_SECONDS;
 use crate::error::ErrorCode;
 use crate::poker;
 use crate::state::{Deck, Game, Hand, Phase};
@@ -78,5 +79,6 @@ pub fn callback_shuffle_handler(
 
     // Both players have cards: betting starts (to_act was set by start_hand).
     a.game.phase = Phase::Preflop;
+    a.game.deadline = Clock::get()?.unix_timestamp + TURN_SECONDS;
     Ok(())
 }

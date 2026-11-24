@@ -80,6 +80,7 @@ pub fn init_game_handler(ctx: Context<InitGame>) -> Result<()> {
         phase: Phase::Waiting,
         board: [0; 5],
         shown: None,
+        deadline: 0,
         winner: None,
         bump: ctx.bumps.game,
     });
@@ -120,7 +121,10 @@ pub fn init_game_handler(ctx: Context<InitGame>) -> Result<()> {
         transfer(
             CpiContext::new(
                 ctx.accounts.system_program.key(),
-                Transfer { from: ctx.accounts.creator.to_account_info(), to },
+                Transfer {
+                    from: ctx.accounts.creator.to_account_info(),
+                    to,
+                },
             ),
             permission_rent,
         )?;

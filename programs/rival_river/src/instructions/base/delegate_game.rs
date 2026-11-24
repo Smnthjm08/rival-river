@@ -4,7 +4,7 @@ use ephemeral_rollups_sdk::cpi::DelegateConfig;
 
 use crate::constants::{DECK_SEED, ER_VALIDATOR, GAME_SEED, HAND_SEED};
 use crate::error::ErrorCode;
-use crate::state::Table;
+use crate::state::{Game, Phase, Table, TableStatus};
 
 /// `#[delegate]` appends the delegation program's accounts to this struct
 /// (for each `del` field X: buffer_X, delegation_record_X,
@@ -20,6 +20,7 @@ pub struct DelegateGame<'info> {
     )]
     pub payer: Signer<'info>,
 
+    #[account(constraint = table.status == TableStatus::InPlay @ ErrorCode::TableNotInPlay)]
     pub table: Account<'info, Table>,
 
     /// CHECK: the Game PDA for this table. Seeds pin its address; `owner`
@@ -46,32 +47,35 @@ pub struct DelegateGame<'info> {
 /// Hands Game, Deck and both Hands to the ephemeral rollup. From here until
 /// they are undelegated, all game instructions run on the rollup, not Solana.
 pub fn delegate_game_handler(ctx: Context<DelegateGame>) -> Result<()> {
+    // Re-delegating a finished game would block settle.
+    let game = Game::try_deserialize(&mut &ctx.accounts.game.data.borrow()[..])?;
+    require!(game.phase != Phase::Finished, ErrorCode::MatchFinished);
+
     let table = ctx.accounts.table.key();
     let (creator, opponent) = (ctx.accounts.table.creator, ctx.accounts.table.opponent);
     let game = ctx.accounts.game.key();
     // Never the caller's choice: only the private validator enforces the
     // permissions that keep the deck and hands secret.
     let validator = Some(ER_VALIDATOR);
+    // No periodic commits: they'd publish the deck and hands unwiped.
+    let config = || DelegateConfig {
+        validator,
+        commit_frequency_ms: u32::MAX,
+    };
 
-    ctx.accounts.delegate_game(
-        &ctx.accounts.payer,
-        &[GAME_SEED, table.as_ref()],
-        DelegateConfig { validator, ..Default::default() },
-    )?;
-    ctx.accounts.delegate_deck(
-        &ctx.accounts.payer,
-        &[DECK_SEED, game.as_ref()],
-        DelegateConfig { validator, ..Default::default() },
-    )?;
+    ctx.accounts
+        .delegate_game(&ctx.accounts.payer, &[GAME_SEED, table.as_ref()], config())?;
+    ctx.accounts
+        .delegate_deck(&ctx.accounts.payer, &[DECK_SEED, game.as_ref()], config())?;
     ctx.accounts.delegate_hand_creator(
         &ctx.accounts.payer,
         &[HAND_SEED, game.as_ref(), creator.as_ref()],
-        DelegateConfig { validator, ..Default::default() },
+        config(),
     )?;
     ctx.accounts.delegate_hand_opponent(
         &ctx.accounts.payer,
         &[HAND_SEED, game.as_ref(), opponent.as_ref()],
-        DelegateConfig { validator, ..Default::default() },
+        config(),
     )?;
     Ok(())
 }

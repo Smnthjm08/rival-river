@@ -38,6 +38,12 @@ pub const ER_VALIDATOR: Pubkey =
 pub const ER_VALIDATOR: Pubkey =
     Pubkey::from_str_const("mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev");
 
+/// Seconds to act (or submit a secret) before claim_timeout is allowed.
+pub const TURN_SECONDS: i64 = 30;
+
+/// Seconds from join_table until an unsettled match can be refunded.
+pub const MATCH_SECONDS: i64 = 2 * 60 * 60;
+
 /// Chips each player starts the match with.
 pub const STARTING_STACK: u16 = 100;
 

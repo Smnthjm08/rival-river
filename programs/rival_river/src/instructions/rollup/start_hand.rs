@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-use crate::constants::{BLINDS, GAME_SEED, MAX_HANDS};
+use crate::constants::{BLINDS, GAME_SEED, MAX_HANDS, TURN_SECONDS};
 use crate::error::ErrorCode;
 use crate::state::{Game, Phase};
 
@@ -41,7 +41,12 @@ pub fn start_hand_handler(ctx: Context<StartHand>) -> Result<()> {
     game.shown = None;
     game.min_raise = big;
     // If the small blind put them all-in, the big blind acts first.
-    game.to_act = if game.stacks[sb] == 0 { bb as u8 } else { game.dealer };
+    game.to_act = if game.stacks[sb] == 0 {
+        bb as u8
+    } else {
+        game.dealer
+    };
     game.phase = Phase::Dealing;
+    game.deadline = Clock::get()?.unix_timestamp + TURN_SECONDS;
     Ok(())
 }

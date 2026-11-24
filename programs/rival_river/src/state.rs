@@ -14,6 +14,8 @@ pub struct Table {
     /// decimals, so 1 USDC = 1_000_000). The winner takes twice this.
     pub stake: u64,
     pub status: TableStatus,
+    /// After this (unix time), `refund` is allowed. Set by join_table.
+    pub deadline: i64,
     pub bump: u8,
 }
 
@@ -27,7 +29,7 @@ pub enum TableStatus {
     InPlay,
     /// Winner paid out.
     Settled,
-    /// Cancelled before the opponent joined; creator's stake returned.
+    /// Stakes returned (cancel_table or refund).
     Refunded,
 }
 
@@ -76,6 +78,8 @@ pub struct Game {
     /// Both players' hole cards, [creator, opponent], once a hand goes to
     /// showdown. Cleared by start_hand. Folded hands are never shown.
     pub shown: Option<[[u8; 2]; 2]>,
+    /// After this (unix time), claim_timeout is allowed.
+    pub deadline: i64,
     /// Index of the match winner, once there is one.
     pub winner: Option<u8>,
     pub bump: u8,

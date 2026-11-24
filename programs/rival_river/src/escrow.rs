@@ -26,12 +26,14 @@ pub fn deposit<'info>(
         to: vault.to_account_info(),
         authority: player.to_account_info(),
     };
-    transfer_checked(CpiContext::new(token_program.key(), accounts), amount, mint.decimals)
+    transfer_checked(
+        CpiContext::new(token_program.key(), accounts),
+        amount,
+        mint.decimals,
+    )
 }
 
-/// Pays the whole vault to `to`, then closes the vault and sends its rent
-/// to `rent_to`. The vault's authority is the Table PDA, which has no
-/// private key: the program signs for it with the table's seeds.
+/// Pays the whole vault to `to`, then closes it (rent to `rent_to`).
 pub fn release<'info>(
     table: &Account<'info, Table>,
     vault: &InterfaceAccount<'info, TokenAccount>,
@@ -40,10 +42,21 @@ pub fn release<'info>(
     rent_to: AccountInfo<'info>,
     token_program: &Interface<'info, TokenInterface>,
 ) -> Result<()> {
+    pay(table, vault, mint, to, vault.amount, token_program)?;
+    close_vault(table, vault, rent_to, token_program)
+}
+
+/// Moves `amount` out of the vault, signing as the Table PDA.
+pub fn pay<'info>(
+    table: &Account<'info, Table>,
+    vault: &InterfaceAccount<'info, TokenAccount>,
+    mint: &InterfaceAccount<'info, Mint>,
+    to: &InterfaceAccount<'info, TokenAccount>,
+    amount: u64,
+    token_program: &Interface<'info, TokenInterface>,
+) -> Result<()> {
     let id = table.table_id.to_le_bytes();
     let seeds: &[&[u8]] = &[TABLE_SEED, table.creator.as_ref(), &id, &[table.bump]];
-    let signer = &[seeds];
-
     let accounts = TransferChecked {
         from: vault.to_account_info(),
         mint: mint.to_account_info(),
@@ -51,15 +64,29 @@ pub fn release<'info>(
         authority: table.to_account_info(),
     };
     transfer_checked(
-        CpiContext::new_with_signer(token_program.key(), accounts, signer),
-        vault.amount,
+        CpiContext::new_with_signer(token_program.key(), accounts, &[seeds]),
+        amount,
         mint.decimals,
-    )?;
+    )
+}
 
+/// Closes the empty vault, rent to `rent_to`.
+pub fn close_vault<'info>(
+    table: &Account<'info, Table>,
+    vault: &InterfaceAccount<'info, TokenAccount>,
+    rent_to: AccountInfo<'info>,
+    token_program: &Interface<'info, TokenInterface>,
+) -> Result<()> {
+    let id = table.table_id.to_le_bytes();
+    let seeds: &[&[u8]] = &[TABLE_SEED, table.creator.as_ref(), &id, &[table.bump]];
     let accounts = CloseAccount {
         account: vault.to_account_info(),
         destination: rent_to,
         authority: table.to_account_info(),
     };
-    close_account(CpiContext::new_with_signer(token_program.key(), accounts, signer))
+    close_account(CpiContext::new_with_signer(
+        token_program.key(),
+        accounts,
+        &[seeds],
+    ))
 }

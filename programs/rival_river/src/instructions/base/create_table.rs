@@ -56,7 +56,14 @@ pub fn create_table_handler(
     require_keys_neq!(opponent, a.creator.key(), ErrorCode::OpponentIsCreator);
     require!(stake > 0, ErrorCode::ZeroStake);
 
-    escrow::deposit(&a.creator, &a.creator_token, &a.vault, &a.mint, &a.token_program, stake)?;
+    escrow::deposit(
+        &a.creator,
+        &a.creator_token,
+        &a.vault,
+        &a.mint,
+        &a.token_program,
+        stake,
+    )?;
 
     ctx.accounts.table.set_inner(Table {
         table_id,
@@ -65,6 +72,7 @@ pub fn create_table_handler(
         mint: ctx.accounts.mint.key(),
         stake,
         status: TableStatus::WaitingForOpponent,
+        deadline: 0,
         bump: ctx.bumps.table,
     });
     Ok(())

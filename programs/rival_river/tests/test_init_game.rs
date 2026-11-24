@@ -1,15 +1,18 @@
 mod common;
 
 use {
-    anchor_spl::{associated_token::{self, get_associated_token_address}, token},
-    common::{create_mint, fund},
     anchor_lang::{
         prelude::Pubkey, solana_program::instruction::Instruction, AccountDeserialize,
         InstructionData, ToAccountMetas,
     },
+    anchor_spl::{
+        associated_token::{self, get_associated_token_address},
+        token,
+    },
+    common::{create_mint, fund},
     litesvm::LiteSVM,
-    rival_river::state::{Deck, Game, Hand, Phase, Table, TableStatus},
     rival_river::constants::{DECK_SEED, GAME_SEED, HAND_SEED, TABLE_SEED},
+    rival_river::state::{Deck, Game, Hand, Phase, Table, TableStatus},
     solana_keypair::Keypair,
     solana_message::{Message, VersionedMessage},
     solana_signer::Signer,
@@ -53,8 +56,12 @@ fn create_table(svm: &mut LiteSVM, creator: &Keypair, join: bool) -> Pubkey {
 
     let ix = Instruction::new_with_bytes(
         rival_river::id(),
-        &rival_river::instruction::CreateTable { table_id: 1, opponent: opponent.pubkey(), stake: STAKE }
-            .data(),
+        &rival_river::instruction::CreateTable {
+            table_id: 1,
+            opponent: opponent.pubkey(),
+            stake: STAKE,
+        }
+        .data(),
         rival_river::accounts::CreateTable {
             creator: creator.pubkey(),
             table,
@@ -130,7 +137,9 @@ fn creator_opens_game_for_their_table() {
     assert_eq!(game.phase, Phase::Waiting);
     assert_eq!(game.winner, None);
 
-    let account = svm.get_account(&pda(&[DECK_SEED, game_key.as_ref()])).unwrap();
+    let account = svm
+        .get_account(&pda(&[DECK_SEED, game_key.as_ref()]))
+        .unwrap();
     let deck = Deck::try_deserialize(&mut account.data.as_slice()).unwrap();
     assert_eq!(deck.game, game_key);
     assert!(!deck.shuffled);
@@ -138,7 +147,9 @@ fn creator_opens_game_for_their_table() {
     // One empty Hand per player.
     let t = read_table(&svm, table);
     for player in [t.creator, t.opponent] {
-        let account = svm.get_account(&pda(&[HAND_SEED, game_key.as_ref(), player.as_ref()])).unwrap();
+        let account = svm
+            .get_account(&pda(&[HAND_SEED, game_key.as_ref(), player.as_ref()]))
+            .unwrap();
         let hand = Hand::try_deserialize(&mut account.data.as_slice()).unwrap();
         assert_eq!((hand.game, hand.player), (game_key, player));
         assert!(!hand.dealt && !hand.has_secret);
@@ -168,5 +179,8 @@ fn stranger_cannot_open_game() {
 fn game_needs_both_stakes() {
     let (mut svm, creator) = setup();
     let table = create_table(&mut svm, &creator, false);
-    assert!(!init_game(&mut svm, &creator, table), "opponent hasn't joined");
+    assert!(
+        !init_game(&mut svm, &creator, table),
+        "opponent hasn't joined"
+    );
 }

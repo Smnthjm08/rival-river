@@ -35,7 +35,14 @@ pub struct CancelTable<'info> {
 /// The creator takes their stake back (and the vault's rent).
 pub fn cancel_table_handler(ctx: Context<CancelTable>) -> Result<()> {
     let a = &ctx.accounts;
-    escrow::release(&a.table, &a.vault, &a.mint, &a.creator_token, a.creator.to_account_info(), &a.token_program)?;
+    escrow::release(
+        &a.table,
+        &a.vault,
+        &a.mint,
+        &a.creator_token,
+        a.creator.to_account_info(),
+        &a.token_program,
+    )?;
     ctx.accounts.table.status = TableStatus::Refunded;
     Ok(())
 }

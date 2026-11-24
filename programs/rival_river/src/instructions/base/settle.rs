@@ -1,13 +1,14 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
-use crate::constants::GAME_SEED;
+use crate::constants::{DECK_SEED, GAME_SEED, HAND_SEED};
 use crate::error::ErrorCode;
 use crate::escrow;
-use crate::state::{Game, Phase, Table, TableStatus};
+use crate::state::{Deck, Game, Hand, Phase, Table, TableStatus};
 
 /// Runs on Solana, after undelegate_game. Anyone can send it: the money can
 /// only go to the winner.
+/// Boxed: unboxed, these accounts overflow the 4 KB stack frame.
 #[derive(Accounts)]
 pub struct Settle<'info> {
     #[account(
@@ -16,26 +17,40 @@ pub struct Settle<'info> {
         has_one = mint,
         constraint = table.status == TableStatus::InPlay @ ErrorCode::TableNotInPlay,
     )]
-    pub table: Account<'info, Table>,
+    pub table: Box<Account<'info, Table>>,
 
     /// `Account` checks that this program owns the Game. While it's delegated
     /// the delegation program owns it, and Solana's copy is out of date, so
     /// settling fails until the game has been undelegated.
-    #[account(seeds = [GAME_SEED, table.key().as_ref()], bump = game.bump,
+    /// Game, Deck and Hands are closed; their rent goes to the creator.
+    #[account(mut, close = creator, seeds = [GAME_SEED, table.key().as_ref()], bump = game.bump,
               constraint = game.phase == Phase::Finished @ ErrorCode::MatchNotFinished)]
-    pub game: Account<'info, Game>,
+    pub game: Box<Account<'info, Game>>,
 
-    pub mint: InterfaceAccount<'info, Mint>,
+    #[account(mut, close = creator, seeds = [DECK_SEED, game.key().as_ref()], bump = deck.bump)]
+    pub deck: Box<Account<'info, Deck>>,
+
+    #[account(mut, close = creator,
+              seeds = [HAND_SEED, game.key().as_ref(), game.players[0].as_ref()],
+              bump = hand_creator.bump)]
+    pub hand_creator: Box<Account<'info, Hand>>,
+
+    #[account(mut, close = creator,
+              seeds = [HAND_SEED, game.key().as_ref(), game.players[1].as_ref()],
+              bump = hand_opponent.bump)]
+    pub hand_opponent: Box<Account<'info, Hand>>,
+
+    pub mint: Box<InterfaceAccount<'info, Mint>>,
 
     /// The winner's token account; checked against `game.winner` below.
     #[account(mut, token::mint = mint, token::token_program = token_program)]
-    pub winner_token: InterfaceAccount<'info, TokenAccount>,
+    pub winner_token: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(mut, associated_token::mint = mint, associated_token::authority = table,
               associated_token::token_program = token_program)]
-    pub vault: InterfaceAccount<'info, TokenAccount>,
+    pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    /// Paid for the vault, so gets its rent back.
+    /// Paid for the vault and the game accounts, so gets their rent back.
     #[account(mut)]
     pub creator: SystemAccount<'info>,
 
@@ -46,9 +61,20 @@ pub struct Settle<'info> {
 pub fn settle_handler(ctx: Context<Settle>) -> Result<()> {
     let a = &ctx.accounts;
     let winner = a.game.winner.ok_or(ErrorCode::MatchNotFinished)?;
-    require_keys_eq!(a.winner_token.owner, a.game.players[winner as usize], ErrorCode::NotTheWinner);
+    require_keys_eq!(
+        a.winner_token.owner,
+        a.game.players[winner as usize],
+        ErrorCode::NotTheWinner
+    );
 
-    escrow::release(&a.table, &a.vault, &a.mint, &a.winner_token, a.creator.to_account_info(), &a.token_program)?;
+    escrow::release(
+        &a.table,
+        &a.vault,
+        &a.mint,
+        &a.winner_token,
+        a.creator.to_account_info(),
+        &a.token_program,
+    )?;
     ctx.accounts.table.status = TableStatus::Settled;
     Ok(())
 }

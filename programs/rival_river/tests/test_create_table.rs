@@ -5,11 +5,14 @@ use {
         prelude::Pubkey, solana_program::instruction::Instruction, AccountDeserialize,
         InstructionData, ToAccountMetas,
     },
-    anchor_spl::{associated_token::{self, get_associated_token_address}, token},
+    anchor_spl::{
+        associated_token::{self, get_associated_token_address},
+        token,
+    },
     common::{balance, create_mint, fund},
     litesvm::LiteSVM,
-    rival_river::state::{Table, TableStatus},
     rival_river::constants::TABLE_SEED,
+    rival_river::state::{Table, TableStatus},
     solana_keypair::Keypair,
     solana_message::{Message, VersionedMessage},
     solana_signer::Signer,
@@ -37,7 +40,12 @@ fn setup() -> Setup {
         svm.airdrop(&k.pubkey(), 1_000_000_000).unwrap();
         fund(&mut svm, k.pubkey(), mint, 3 * STAKE);
     }
-    Setup { svm, creator, opponent, mint }
+    Setup {
+        svm,
+        creator,
+        opponent,
+        mint,
+    }
 }
 
 fn table_pda(creator: &Pubkey, table_id: u64) -> Pubkey {
@@ -61,7 +69,12 @@ fn create_table(s: &mut Setup, table_id: u64, opponent: Pubkey, stake: u64) -> b
     let table = table_pda(&creator, table_id);
     let ix = Instruction::new_with_bytes(
         rival_river::id(),
-        &rival_river::instruction::CreateTable { table_id, opponent, stake }.data(),
+        &rival_river::instruction::CreateTable {
+            table_id,
+            opponent,
+            stake,
+        }
+        .data(),
         rival_river::accounts::CreateTable {
             creator,
             table,
@@ -129,11 +142,17 @@ fn create_table_escrows_the_creators_stake() {
     let table = table_pda(&s.creator.pubkey(), 7);
     assert_eq!(s.svm.get_account(&table).unwrap().owner, rival_river::id());
     let t = read_table(&s.svm, table);
-    assert_eq!((t.table_id, t.creator, t.opponent), (7, s.creator.pubkey(), opponent));
+    assert_eq!(
+        (t.table_id, t.creator, t.opponent),
+        (7, s.creator.pubkey(), opponent)
+    );
     assert_eq!((t.mint, t.stake), (s.mint, STAKE));
     assert_eq!(t.status, TableStatus::WaitingForOpponent);
 
-    assert_eq!(balance(&s.svm, get_associated_token_address(&table, &s.mint)), STAKE);
+    assert_eq!(
+        balance(&s.svm, get_associated_token_address(&table, &s.mint)),
+        STAKE
+    );
     let creator = s.creator.insecure_clone();
     assert_eq!(wallet(&s, &creator), 2 * STAKE);
 }
@@ -155,7 +174,10 @@ fn cannot_invite_yourself_or_stake_nothing() {
     let opponent = s.opponent.pubkey();
     assert!(!create_table(&mut s, 1, me, STAKE));
     assert!(!create_table(&mut s, 1, opponent, 0));
-    assert!(!create_table(&mut s, 1, opponent, 4 * STAKE), "more than the creator holds");
+    assert!(
+        !create_table(&mut s, 1, opponent, 4 * STAKE),
+        "more than the creator holds"
+    );
 }
 
 #[test]
@@ -165,14 +187,23 @@ fn opponent_joins_and_locks_both_stakes() {
     assert!(create_table(&mut s, 1, opponent.pubkey(), STAKE));
     let table = table_pda(&creator.pubkey(), 1);
 
-    assert!(!join_table(&mut s, &creator, table), "creator can't take the opponent's seat");
+    assert!(
+        !join_table(&mut s, &creator, table),
+        "creator can't take the opponent's seat"
+    );
     assert!(join_table(&mut s, &opponent, table));
     assert!(!join_table(&mut s, &opponent, table), "only once");
 
     assert_eq!(read_table(&s.svm, table).status, TableStatus::Locked);
-    assert_eq!(balance(&s.svm, get_associated_token_address(&table, &s.mint)), 2 * STAKE);
+    assert_eq!(
+        balance(&s.svm, get_associated_token_address(&table, &s.mint)),
+        2 * STAKE
+    );
     assert_eq!(wallet(&s, &opponent), 2 * STAKE);
-    assert!(!cancel_table(&mut s, &creator, table), "stakes are locked once both are in");
+    assert!(
+        !cancel_table(&mut s, &creator, table),
+        "stakes are locked once both are in"
+    );
 }
 
 #[test]
@@ -186,7 +217,78 @@ fn creator_can_cancel_before_anyone_joins() {
     assert!(cancel_table(&mut s, &creator, table));
     assert_eq!(read_table(&s.svm, table).status, TableStatus::Refunded);
     assert_eq!(wallet(&s, &creator), 3 * STAKE);
-    assert!(s.svm.get_account(&get_associated_token_address(&table, &s.mint)).map_or(true, |a| a.lamports == 0),
-        "vault closed");
+    assert!(
+        s.svm
+            .get_account(&get_associated_token_address(&table, &s.mint))
+            .map_or(true, |a| a.lamports == 0),
+        "vault closed"
+    );
     assert!(!join_table(&mut s, &opponent, table), "too late to join");
+}
+
+// ---- Refund deadline ----------------------------------------------------------
+
+fn refund(s: &mut Setup, table: Pubkey) -> bool {
+    let (creator, opponent) = (s.creator.pubkey(), s.opponent.pubkey());
+    let game = Pubkey::find_program_address(
+        &[rival_river::constants::GAME_SEED, table.as_ref()],
+        &rival_river::id(),
+    )
+    .0;
+    let ix = Instruction::new_with_bytes(
+        rival_river::id(),
+        &rival_river::instruction::Refund {}.data(),
+        rival_river::accounts::Refund {
+            table,
+            game,
+            mint: s.mint,
+            creator_token: get_associated_token_address(&creator, &s.mint),
+            opponent_token: get_associated_token_address(&opponent, &s.mint),
+            vault: get_associated_token_address(&table, &s.mint),
+            creator,
+            token_program: token::ID,
+        }
+        .to_account_metas(None),
+    );
+    let payer = s.opponent.insecure_clone();
+    send(&mut s.svm, &payer, ix)
+}
+
+fn advance_clock(svm: &mut LiteSVM, seconds: i64) {
+    let mut clock: anchor_lang::prelude::Clock = svm.get_sysvar();
+    clock.unix_timestamp += seconds;
+    svm.set_sysvar(&clock);
+}
+
+#[test]
+fn stakes_come_back_if_the_game_never_starts() {
+    let mut s = setup();
+    let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    assert!(create_table(&mut s, 1, opponent.pubkey(), STAKE));
+    let table = table_pda(&creator.pubkey(), 1);
+    assert!(join_table(&mut s, &opponent, table));
+    let t = read_table(&s.svm, table);
+    assert!(t.deadline > 0, "set when the opponent joins");
+
+    // The creator never runs init_game.
+    assert!(!refund(&mut s, table), "too early");
+    advance_clock(&mut s.svm, rival_river::constants::MATCH_SECONDS + 1);
+    assert!(refund(&mut s, table));
+    assert_eq!(read_table(&s.svm, table).status, TableStatus::Refunded);
+    assert_eq!(
+        (wallet(&s, &creator), wallet(&s, &opponent)),
+        (3 * STAKE, 3 * STAKE)
+    );
+    assert!(!refund(&mut s, table), "only once");
+}
+
+#[test]
+fn unjoined_table_is_cancelled_not_refunded() {
+    let mut s = setup();
+    let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    assert!(create_table(&mut s, 1, opponent.pubkey(), STAKE));
+    let table = table_pda(&creator.pubkey(), 1);
+    advance_clock(&mut s.svm, rival_river::constants::MATCH_SECONDS + 1);
+    assert!(!refund(&mut s, table));
+    assert!(cancel_table(&mut s, &creator, table));
 }

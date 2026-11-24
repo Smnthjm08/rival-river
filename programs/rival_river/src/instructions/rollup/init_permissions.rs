@@ -1,8 +1,7 @@
 use anchor_lang::prelude::*;
 use ephemeral_rollups_sdk::access_control::instructions::CreateEphemeralPermissionCpi;
 use ephemeral_rollups_sdk::access_control::structs::{
-    EphemeralMembersArgs, Member, PERMISSION_SEED, TX_BALANCES_FLAG, TX_LOGS_FLAG,
-    TX_MESSAGE_FLAG,
+    EphemeralMembersArgs, Member, PERMISSION_SEED, TX_BALANCES_FLAG, TX_LOGS_FLAG, TX_MESSAGE_FLAG,
 };
 use ephemeral_rollups_sdk::consts::{EPHEMERAL_VAULT_ID, MAGIC_PROGRAM_ID, PERMISSION_PROGRAM_ID};
 
@@ -73,7 +72,10 @@ pub struct InitPermissions<'info> {
 /// no AUTHORITY_FLAG: players must not be able to rewrite permissions (e.g.
 /// add themselves to the Deck). The accounts themselves stay the authority.
 fn reader(pubkey: Pubkey) -> Member {
-    Member { flags: TX_LOGS_FLAG | TX_MESSAGE_FLAG | TX_BALANCES_FLAG, pubkey }
+    Member {
+        flags: TX_LOGS_FLAG | TX_MESSAGE_FLAG | TX_BALANCES_FLAG,
+        pubkey,
+    }
 }
 
 /// A member who can read the account's data but none of its transactions.
@@ -110,13 +112,23 @@ pub fn init_permissions_handler(ctx: Context<InitPermissions>) -> Result<()> {
         (
             a.hand_creator.to_account_info(),
             a.hand_creator_permission.to_account_info(),
-            &[HAND_SEED, game_key.as_ref(), creator.as_ref(), &creator_bump],
+            &[
+                HAND_SEED,
+                game_key.as_ref(),
+                creator.as_ref(),
+                &creator_bump,
+            ],
             vec![reader(creator)],
         ),
         (
             a.hand_opponent.to_account_info(),
             a.hand_opponent_permission.to_account_info(),
-            &[HAND_SEED, game_key.as_ref(), opponent.as_ref(), &opponent_bump],
+            &[
+                HAND_SEED,
+                game_key.as_ref(),
+                opponent.as_ref(),
+                &opponent_bump,
+            ],
             vec![reader(opponent)],
         ),
     ];
@@ -135,7 +147,10 @@ pub fn init_permissions_handler(ctx: Context<InitPermissions>) -> Result<()> {
             vault: a.ephemeral_vault.to_account_info(),
             magic_program: a.magic_program.to_account_info(),
             permission_program: a.permission_program.to_account_info(),
-            args: EphemeralMembersArgs { is_private: true, members },
+            args: EphemeralMembersArgs {
+                is_private: true,
+                members,
+            },
         }
         .invoke_signed(&[seeds])?;
     }

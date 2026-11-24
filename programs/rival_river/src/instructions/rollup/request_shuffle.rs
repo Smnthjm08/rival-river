@@ -55,7 +55,11 @@ pub fn request_shuffle_handler(ctx: Context<RequestShuffle>) -> Result<()> {
     );
 
     let game = &a.game;
-    let meta = |pubkey: Pubkey| SerializableAccountMeta { pubkey, is_signer: false, is_writable: true };
+    let meta = |pubkey: Pubkey| SerializableAccountMeta {
+        pubkey,
+        is_signer: false,
+        is_writable: true,
+    };
     let ix = create_request_scoped_randomness_ix(RequestRandomnessParams {
         payer: a.player.key(),
         oracle_queue: a.oracle_queue.key(),
