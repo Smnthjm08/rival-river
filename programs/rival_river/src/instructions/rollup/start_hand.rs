@@ -38,7 +38,10 @@ pub fn start_hand_handler(ctx: Context<StartHand>) -> Result<()> {
     game.pot = 0;
     game.acted = [false; 2];
     game.board = [0; 5];
-    game.to_act = game.dealer;
+    game.shown = None;
+    game.min_raise = big;
+    // If the small blind put them all-in, the big blind acts first.
+    game.to_act = if game.stacks[sb] == 0 { bb as u8 } else { game.dealer };
     game.phase = Phase::Dealing;
     Ok(())
 }

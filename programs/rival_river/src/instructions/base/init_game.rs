@@ -4,7 +4,8 @@ use ephemeral_rollups_sdk::access_control::structs::EphemeralPermission;
 use ephemeral_rollups_sdk::ephemeral_accounts::rent;
 
 use crate::constants::{DECK_SEED, GAME_SEED, HAND_SEED, MAX_PERMISSION_MEMBERS, STARTING_STACK};
-use crate::state::{Deck, Game, Hand, Phase, Table};
+use crate::error::ErrorCode;
+use crate::state::{Deck, Game, Hand, Phase, Table, TableStatus};
 
 #[derive(Accounts)]
 pub struct InitGame<'info> {
@@ -12,8 +13,10 @@ pub struct InitGame<'info> {
     pub creator: Signer<'info>,
 
     /// `has_one = creator` checks table.creator == creator.key(),
-    /// so only the table's creator can open its game.
-    #[account(has_one = creator)]
+    /// so only the table's creator can open its game. Only once both stakes
+    /// are in the vault.
+    #[account(mut, has_one = creator,
+              constraint = table.status == TableStatus::Locked @ ErrorCode::TableNotLocked)]
     pub table: Account<'info, Table>,
 
     #[account(
@@ -58,6 +61,7 @@ pub struct InitGame<'info> {
 /// Creates the match-state accounts on Solana. All four get delegated to the
 /// rollup later; one game per table, enforced by the PDA seeds.
 pub fn init_game_handler(ctx: Context<InitGame>) -> Result<()> {
+    ctx.accounts.table.status = TableStatus::InPlay;
     let table = &ctx.accounts.table;
     let game_key = ctx.accounts.game.key();
 

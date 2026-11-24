@@ -14,7 +14,7 @@ cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-idl = []
 no-log-ix-name = []
-idl-build = ["anchor-lang/idl-build"]
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 anchor-debug = []
 custom-heap = []
 custom-panic = []
@@ -25,6 +25,7 @@ localnet = []
 [dependencies]
 anchor-lang = { version = "=1.0.2", features = ["init-if-needed"] }
 ephemeral-rollups-sdk = { version = "0.16.2", features = ["anchor", "access-control", "vrf"] }
+anchor-spl = { version = "=1.0.2", default-features = false, features = ["token", "token_2022", "associated_token"] }
 # SHA-256 for the shuffle. On-chain it's a syscall; "sha2" covers off-chain unit tests.
 solana-sha256-hasher = { version = "3.1.0", features = ["sha2"] }
 
@@ -34,6 +35,7 @@ solana-message = "3.0.1"
 solana-transaction = "3.0.2"
 solana-signer = "3.0.0"
 solana-keypair = "3.0.1"
+solana-account = "3.2.0"
 
 
 [lints.rust]

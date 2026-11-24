@@ -34,4 +34,16 @@ pub enum ErrorCode {
     NotEnoughChips,
     #[msg("Your opponent is all-in: call or fold")]
     OpponentAllIn,
+    #[msg("Stake must be more than zero")]
+    ZeroStake,
+    #[msg("This table isn't waiting for an opponent")]
+    TableNotOpen,
+    #[msg("Both players must stake before the game starts")]
+    TableNotLocked,
+    #[msg("This table has no match in play")]
+    TableNotInPlay,
+    #[msg("The match isn't finished")]
+    MatchNotFinished,
+    #[msg("Winnings can only go to the winner's token account")]
+    NotTheWinner,
 }

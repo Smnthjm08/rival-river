@@ -1,16 +1,23 @@
+mod common;
+
 use {
+    anchor_spl::{associated_token::{self, get_associated_token_address}, token},
+    common::{create_mint, fund},
     anchor_lang::{
         prelude::Pubkey, solana_program::instruction::Instruction, AccountDeserialize,
         InstructionData, ToAccountMetas,
     },
     litesvm::LiteSVM,
-    rival_river::state::{Deck, Game, Hand, Phase, Table},
+    rival_river::state::{Deck, Game, Hand, Phase, Table, TableStatus},
     rival_river::constants::{DECK_SEED, GAME_SEED, HAND_SEED, TABLE_SEED},
     solana_keypair::Keypair,
     solana_message::{Message, VersionedMessage},
     solana_signer::Signer,
     solana_transaction::versioned::VersionedTransaction,
 };
+
+/// 10 USDC (6 decimals).
+const STAKE: u64 = 10_000_000;
 
 fn setup() -> (LiteSVM, Keypair) {
     let mut svm = LiteSVM::new();
@@ -33,25 +40,50 @@ fn send(svm: &mut LiteSVM, signer: &Keypair, ix: Instruction) -> bool {
     ok
 }
 
-/// Creates table #1 for `creator` and returns its address.
-fn create_table(svm: &mut LiteSVM, creator: &Keypair) -> Pubkey {
+/// Creates table #1 for `creator`. With `join`, an opponent also stakes, so
+/// the table is Locked and ready for init_game.
+fn create_table(svm: &mut LiteSVM, creator: &Keypair, join: bool) -> Pubkey {
+    let mint = create_mint(svm);
+    let opponent = Keypair::new();
+    svm.airdrop(&opponent.pubkey(), 1_000_000_000).unwrap();
+    let creator_token = fund(svm, creator.pubkey(), mint, STAKE);
+    let opponent_token = fund(svm, opponent.pubkey(), mint, STAKE);
     let table = pda(&[TABLE_SEED, creator.pubkey().as_ref(), &1u64.to_le_bytes()]);
+    let vault = get_associated_token_address(&table, &mint);
+
     let ix = Instruction::new_with_bytes(
         rival_river::id(),
-        &rival_river::instruction::CreateTable {
-            table_id: 1,
-            opponent: Pubkey::new_unique(),
-            creator_nft: Pubkey::new_unique(),
-        }
-        .data(),
+        &rival_river::instruction::CreateTable { table_id: 1, opponent: opponent.pubkey(), stake: STAKE }
+            .data(),
         rival_river::accounts::CreateTable {
             creator: creator.pubkey(),
             table,
+            mint,
+            creator_token,
+            vault,
+            token_program: token::ID,
+            associated_token_program: associated_token::ID,
             system_program: anchor_lang::system_program::ID,
         }
         .to_account_metas(None),
     );
     assert!(send(svm, creator, ix));
+    if join {
+        let ix = Instruction::new_with_bytes(
+            rival_river::id(),
+            &rival_river::instruction::JoinTable {}.data(),
+            rival_river::accounts::JoinTable {
+                opponent: opponent.pubkey(),
+                table,
+                mint,
+                opponent_token,
+                vault,
+                token_program: token::ID,
+            }
+            .to_account_metas(None),
+        );
+        assert!(send(svm, &opponent, ix));
+    }
     table
 }
 
@@ -82,9 +114,10 @@ fn init_game(svm: &mut LiteSVM, signer: &Keypair, table: Pubkey) -> bool {
 #[test]
 fn creator_opens_game_for_their_table() {
     let (mut svm, creator) = setup();
-    let table = create_table(&mut svm, &creator);
+    let table = create_table(&mut svm, &creator, true);
 
     assert!(init_game(&mut svm, &creator, table));
+    assert_eq!(read_table(&svm, table).status, TableStatus::InPlay);
 
     let game_key = pda(&[GAME_SEED, table.as_ref()]);
     let account = svm.get_account(&game_key).unwrap();
@@ -115,7 +148,7 @@ fn creator_opens_game_for_their_table() {
 #[test]
 fn only_one_game_per_table() {
     let (mut svm, creator) = setup();
-    let table = create_table(&mut svm, &creator);
+    let table = create_table(&mut svm, &creator, true);
 
     assert!(init_game(&mut svm, &creator, table));
     assert!(!init_game(&mut svm, &creator, table));
@@ -124,9 +157,16 @@ fn only_one_game_per_table() {
 #[test]
 fn stranger_cannot_open_game() {
     let (mut svm, creator) = setup();
-    let table = create_table(&mut svm, &creator);
+    let table = create_table(&mut svm, &creator, true);
     let stranger = Keypair::new();
     svm.airdrop(&stranger.pubkey(), 1_000_000_000).unwrap();
 
     assert!(!init_game(&mut svm, &stranger, table));
+}
+
+#[test]
+fn game_needs_both_stakes() {
+    let (mut svm, creator) = setup();
+    let table = create_table(&mut svm, &creator, false);
+    assert!(!init_game(&mut svm, &creator, table), "opponent hasn't joined");
 }

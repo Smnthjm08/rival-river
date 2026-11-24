@@ -80,9 +80,11 @@ struct Setup {
     deck: Pubkey,
     hand_creator: Pubkey,
     hand_opponent: Pubkey,
+    mint: Pubkey,
 }
 
-/// Creates a table between two funded players. Does NOT run init_game.
+/// Creates a table between two funded players, and both stake: the table is
+/// Locked. Does NOT run init_game.
 fn setup() -> Setup {
     let mut svm = MagicSVM::new();
     svm.add_program_from_file(addr(rival_river::id()), SO).unwrap();
@@ -96,11 +98,91 @@ fn setup() -> Setup {
     let deck = pda(&[DECK_SEED, game.as_ref()]);
     let hand_creator = pda(&[HAND_SEED, game.as_ref(), key(&creator).as_ref()]);
     let hand_opponent = pda(&[HAND_SEED, game.as_ref(), key(&opponent).as_ref()]);
+    let mint = create_mint(&mut svm);
+    for k in [&creator, &opponent] {
+        fund(&mut svm, key(k), mint, STAKE);
+    }
+    let vault = ata(table, mint);
     assert!(send(&mut svm, Base, &creator, ix(
-        instruction::CreateTable { table_id: 1, opponent: key(&opponent), creator_nft: Pubkey::new_unique() },
-        accounts::CreateTable { creator: key(&creator), table, system_program: system_program::ID },
+        instruction::CreateTable { table_id: 1, opponent: key(&opponent), stake: STAKE },
+        accounts::CreateTable {
+            creator: key(&creator),
+            table,
+            mint,
+            creator_token: ata(key(&creator), mint),
+            vault,
+            token_program: token_program(),
+            associated_token_program: Pubkey::new_from_array(ASSOCIATED_TOKEN_PROGRAM_ID.to_bytes()),
+            system_program: system_program::ID,
+        },
     )));
-    Setup { svm, creator, opponent, table, game, deck, hand_creator, hand_opponent }
+    assert!(send(&mut svm, Base, &opponent, ix(
+        instruction::JoinTable {},
+        accounts::JoinTable {
+            opponent: key(&opponent),
+            table,
+            mint,
+            opponent_token: ata(key(&opponent), mint),
+            vault,
+            token_program: token_program(),
+        },
+    )));
+    Setup { svm, creator, opponent, table, game, deck, hand_creator, hand_opponent, mint }
+}
+
+// ---- Tokens: raw SPL accounts, as in MagicSVM's own tests ------------------
+
+use ephemeral_rollups_sdk::consts::{ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID};
+
+/// 10 USDC (6 decimals).
+const STAKE: u64 = 10_000_000;
+
+fn token_program() -> Pubkey {
+    Pubkey::new_from_array(TOKEN_PROGRAM_ID.to_bytes())
+}
+
+/// `owner`'s associated token account for `mint`.
+fn ata(owner: Pubkey, mint: Pubkey) -> Pubkey {
+    let program = Pubkey::new_from_array(ASSOCIATED_TOKEN_PROGRAM_ID.to_bytes());
+    Pubkey::find_program_address(&[owner.as_ref(), token_program().as_ref(), mint.as_ref()], &program).0
+}
+
+fn write_token_account(svm: &mut MagicSVM, address: Pubkey, data: Vec<u8>) {
+    let account = solana_account::Account {
+        lamports: 10_000_000,
+        data,
+        owner: addr(token_program()),
+        executable: false,
+        rent_epoch: 0,
+    };
+    svm.set_account(addr(address), account).unwrap();
+}
+
+/// A fresh 6-decimal mint (82-byte SPL Mint: no authority, initialized).
+fn create_mint(svm: &mut MagicSVM) -> Pubkey {
+    let mint = Pubkey::new_unique();
+    let mut data = vec![0u8; 82];
+    data[44] = 6; // decimals
+    data[45] = 1; // is_initialized
+    write_token_account(svm, mint, data);
+    mint
+}
+
+/// Gives `owner` an associated token account holding `amount` (165 bytes:
+/// mint, owner, amount, ..., state = Initialized).
+fn fund(svm: &mut MagicSVM, owner: Pubkey, mint: Pubkey, amount: u64) {
+    let mut data = vec![0u8; 165];
+    data[0..32].copy_from_slice(mint.as_ref());
+    data[32..64].copy_from_slice(owner.as_ref());
+    data[64..72].copy_from_slice(&amount.to_le_bytes());
+    data[108] = 1;
+    write_token_account(svm, ata(owner, mint), data);
+}
+
+/// Token balance on Solana, or None if the account doesn't exist.
+fn balance(svm: &MagicSVM, account: Pubkey) -> Option<u64> {
+    let acc = svm.get_account_for(Base, &addr(account)).filter(|a| a.lamports > 0)?;
+    Some(u64::from_le_bytes(acc.data[64..72].try_into().unwrap()))
 }
 
 fn init_game(s: &mut Setup) {
@@ -499,8 +581,6 @@ fn shuffle_needs_a_started_hand() {
     assert!(request_shuffle(&mut s, &creator));
 }
 
-// TODO: once fold ends a hand, bring back "each hand gets a new deck and
-// needs new secrets" (deal, fold, start_hand, deal again).
 #[test]
 fn no_reshuffle_mid_hand() {
     let mut s = private();
@@ -748,4 +828,250 @@ fn undelegate_mid_shuffle_leaves_no_secrets_on_solana() {
     assert!(request_shuffle(&mut s, &creator));
     assert!(undelegate_game(&mut s, &creator));
     assert_nothing_secret_on_solana(&s);
+}
+
+// ---- Betting: act -------------------------------------------------------------
+
+use rival_river::{poker, Action};
+
+fn act(s: &mut Setup, signer: &Keypair, action: Action) -> bool {
+    let (game, deck, hand_creator, hand_opponent) = (s.game, s.deck, s.hand_creator, s.hand_opponent);
+    send(&mut s.svm, Ephemeral, signer, ix(
+        instruction::Act { action },
+        accounts::Act { player: key(signer), game, deck, hand_creator, hand_opponent },
+    ))
+}
+
+/// private() + shuffle: hand 1 preflop. Creator is the button (small blind)
+/// and acts first.
+fn preflop() -> Setup {
+    let mut s = private();
+    shuffle_and_deal(&mut s);
+    s
+}
+
+/// Showdown scores [creator, opponent] for the current deck, computed the
+/// same way the program should.
+fn scores(s: &Setup) -> [u32; 2] {
+    let board: [u8; 5] = read_deck(&s.svm, Ephemeral, s.deck).cards[4..9].try_into().unwrap();
+    [s.hand_creator, s.hand_opponent].map(|h| {
+        let cards = read_hand(&s.svm, Ephemeral, h).cards;
+        let mut seven = [0u8; 7];
+        seven[..2].copy_from_slice(&cards);
+        seven[2..].copy_from_slice(&board);
+        poker::best_of_seven(seven)
+    })
+}
+
+#[test]
+fn fold_gives_the_pot_to_the_other_player() {
+    let mut s = preflop();
+    let creator = s.creator.insecure_clone();
+    assert!(act(&mut s, &creator, Action::Fold));
+    let g = read_game(&s.svm, Ephemeral, s.game);
+    assert_eq!(g.stacks, [95, 105]);
+    assert_eq!((g.pot, g.bets), (0, [0, 0]));
+    assert_eq!(g.phase, Phase::Waiting);
+    assert_eq!(g.shown, None, "folded hands stay hidden");
+}
+
+#[test]
+fn turn_order_is_enforced() {
+    let mut s = preflop();
+    let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    let stranger = Keypair::new();
+    s.svm.airdrop(&stranger.pubkey(), 1_000_000_000).unwrap();
+    assert!(!act(&mut s, &opponent, Action::Call), "button acts first preflop");
+    assert!(!act(&mut s, &stranger, Action::Fold));
+    assert!(act(&mut s, &creator, Action::Call));
+    assert!(!act(&mut s, &creator, Action::Check), "now it's the big blind's option");
+}
+
+#[test]
+fn illegal_actions_are_refused() {
+    let mut s = preflop();
+    let creator = s.creator.insecure_clone();
+    assert!(!act(&mut s, &creator, Action::Check), "5 to call");
+    assert!(!act(&mut s, &creator, Action::Raise { to: 15 }), "raise by 5 < big blind");
+    assert!(!act(&mut s, &creator, Action::Raise { to: 101 }), "more than the stack");
+    assert!(act(&mut s, &creator, Action::Raise { to: 20 }));
+    assert_eq!(read_game(&s.svm, Ephemeral, s.game).min_raise, 10);
+}
+
+#[test]
+fn reraise_must_match_the_last_raise() {
+    let mut s = preflop();
+    let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    assert!(act(&mut s, &creator, Action::Raise { to: 40 })); // raise by 30
+    assert!(!act(&mut s, &opponent, Action::Raise { to: 60 }), "raise by 20 < 30");
+    assert!(act(&mut s, &opponent, Action::Raise { to: 70 }));
+    let g = read_game(&s.svm, Ephemeral, s.game);
+    assert_eq!((g.bets, g.min_raise, g.to_act), ([40, 70], 30, 0));
+}
+
+#[test]
+fn checked_down_hand_reaches_showdown() {
+    let mut s = preflop();
+    let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    let deck = read_deck(&s.svm, Ephemeral, s.deck).cards;
+
+    assert!(act(&mut s, &creator, Action::Call)); // limp
+    assert!(act(&mut s, &opponent, Action::Check)); // big blind checks its option
+    for (phase, shown) in [(Phase::Flop, 3), (Phase::Turn, 4), (Phase::River, 5)] {
+        let g = read_game(&s.svm, Ephemeral, s.game);
+        assert_eq!(g.phase, phase);
+        assert_eq!(g.board[..shown], deck[4..4 + shown]);
+        assert_eq!((g.pot, g.bets, g.to_act), (20, [0, 0], 1), "out of position acts first");
+        assert_eq!(total_chips(&g), 200);
+        assert!(act(&mut s, &opponent, Action::Check));
+        assert!(act(&mut s, &creator, Action::Check));
+    }
+
+    let g = read_game(&s.svm, Ephemeral, s.game);
+    assert_eq!(g.phase, Phase::Waiting);
+    assert_eq!(total_chips(&g), 200);
+    let [c, o] = scores(&s);
+    let expected = match c.cmp(&o) {
+        std::cmp::Ordering::Greater => [110, 90],
+        std::cmp::Ordering::Less => [90, 110],
+        std::cmp::Ordering::Equal => [100, 100],
+    };
+    assert_eq!(g.stacks, expected);
+    let hands = [s.hand_creator, s.hand_opponent].map(|h| read_hand(&s.svm, Ephemeral, h).cards);
+    assert_eq!(g.shown, Some(hands));
+}
+
+#[test]
+fn all_in_preflop_runs_out_the_board() {
+    let mut s = preflop();
+    let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    assert!(act(&mut s, &creator, Action::Raise { to: 100 }));
+    assert!(!act(&mut s, &opponent, Action::Raise { to: 100 }), "can't raise an all-in");
+    assert!(act(&mut s, &opponent, Action::Call));
+
+    let g = read_game(&s.svm, Ephemeral, s.game);
+    assert_eq!(g.board, read_deck(&s.svm, Ephemeral, s.deck).cards[4..9]);
+    assert_eq!(total_chips(&g), 200);
+    let [c, o] = scores(&s);
+    match c.cmp(&o) {
+        std::cmp::Ordering::Greater => assert_eq!((g.stacks, g.winner, g.phase), ([200, 0], Some(0), Phase::Finished)),
+        std::cmp::Ordering::Less => assert_eq!((g.stacks, g.winner, g.phase), ([0, 200], Some(1), Phase::Finished)),
+        std::cmp::Ordering::Equal => assert_eq!((g.stacks, g.winner, g.phase), ([100, 100], None, Phase::Waiting)),
+    }
+    assert!(!act(&mut s, &creator, Action::Check), "no betting after the hand");
+}
+
+#[test]
+fn each_hand_gets_a_new_deck_and_needs_new_secrets() {
+    let mut s = preflop();
+    let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    let first = read_deck(&s.svm, Ephemeral, s.deck).cards;
+    assert!(act(&mut s, &creator, Action::Fold));
+
+    assert!(start_hand(&mut s, &opponent));
+    let g = read_game(&s.svm, Ephemeral, s.game);
+    // Hand 2: the button moves to the opponent; blinds 10/20.
+    assert_eq!((g.hand_number, g.dealer, g.to_act), (2, 1, 1));
+    assert_eq!(g.bets, [20, 10]);
+    assert!(!request_shuffle(&mut s, &creator), "last hand's secrets are used up");
+
+    shuffle_and_deal(&mut s);
+    let second = read_deck(&s.svm, Ephemeral, s.deck).cards;
+    assert_full_deck(second);
+    assert_ne!(first, second);
+    assert!(act(&mut s, &opponent, Action::Call), "opponent has the button now");
+}
+
+// ---- Settling the match on Solana ----------------------------------------------
+
+use rival_river::state::{Table, TableStatus};
+
+fn read_table(svm: &MagicSVM, table: Pubkey) -> Table {
+    Table::try_deserialize(&mut raw_data(svm, Base, table).as_slice()).unwrap()
+}
+
+/// Sent to Solana by anyone (here: a stranger) to pay `to` the vault.
+fn settle(s: &mut Setup, to: Pubkey) -> bool {
+    let payer = Keypair::new();
+    s.svm.airdrop(&payer.pubkey(), 1_000_000_000).unwrap();
+    let (table, game, mint, creator) = (s.table, s.game, s.mint, key(&s.creator));
+    send(&mut s.svm, Base, &payer, ix(
+        instruction::Settle {},
+        accounts::Settle {
+            table,
+            game,
+            mint,
+            winner_token: to,
+            vault: ata(table, mint),
+            creator,
+            token_program: token_program(),
+        },
+    ))
+}
+
+/// Deals a hand and has each player shove or call until it's over.
+fn play_all_in_hand(s: &mut Setup) {
+    shuffle_and_deal(s);
+    let players = [s.creator.insecure_clone(), s.opponent.insecure_clone()];
+    loop {
+        let g = read_game(&s.svm, Ephemeral, s.game);
+        if !matches!(g.phase, Phase::Preflop | Phase::Flop | Phase::Turn | Phase::River) {
+            return;
+        }
+        let (me, other) = (g.to_act as usize, 1 - g.to_act as usize);
+        let shove = g.bets[me] + g.stacks[me];
+        let action = if g.stacks[other] > 0 && shove > g.bets[other] {
+            Action::Raise { to: shove }
+        } else if g.bets[other] > g.bets[me] {
+            Action::Call
+        } else {
+            Action::Check
+        };
+        assert!(act(s, &players[me], action), "{action:?} refused");
+    }
+}
+
+#[test]
+fn winner_takes_both_stakes() {
+    let mut s = private();
+    let creator = s.creator.insecure_clone();
+    // Split pots don't end the match: keep shoving until someone busts.
+    for _ in 0..10 {
+        play_all_in_hand(&mut s);
+        if read_game(&s.svm, Ephemeral, s.game).phase == Phase::Finished {
+            break;
+        }
+        assert!(start_hand(&mut s, &creator));
+    }
+    let vault = ata(s.table, s.mint);
+    let tokens = [key(&s.creator), key(&s.opponent)].map(|p| ata(p, s.mint));
+    assert_eq!(balance(&s.svm, vault), Some(2 * STAKE));
+    assert_eq!(tokens.map(|t| balance(&s.svm, t)), [Some(0), Some(0)]);
+
+    // Still on the rollup: Solana's Game copy is stale and owned by the
+    // delegation program, so settle refuses.
+    let winner = read_game(&s.svm, Ephemeral, s.game).winner.expect("someone busted") as usize;
+    assert!(!settle(&mut s, tokens[winner]));
+
+    assert!(undelegate_game(&mut s, &creator));
+    assert_eq!(read_game(&s.svm, Base, s.game).winner, Some(winner as u8));
+    assert!(!settle(&mut s, tokens[1 - winner]), "loser can't be paid");
+    assert!(settle(&mut s, tokens[winner]));
+
+    assert_eq!(balance(&s.svm, tokens[winner]), Some(2 * STAKE));
+    assert_eq!(balance(&s.svm, tokens[1 - winner]), Some(0));
+    assert_eq!(balance(&s.svm, vault), None, "vault closed");
+    assert_eq!(read_table(&s.svm, s.table).status, TableStatus::Settled);
+    assert!(!settle(&mut s, tokens[winner]), "only once");
+}
+
+#[test]
+fn cannot_settle_an_unfinished_match() {
+    let mut s = preflop();
+    let creator = s.creator.insecure_clone();
+    assert!(act(&mut s, &creator, Action::Fold));
+    assert!(undelegate_game(&mut s, &creator));
+    let creator_token = ata(key(&s.creator), s.mint);
+    assert!(!settle(&mut s, creator_token));
+    assert_eq!(balance(&s.svm, ata(s.table, s.mint)), Some(2 * STAKE));
 }

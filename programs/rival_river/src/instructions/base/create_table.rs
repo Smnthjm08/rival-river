@@ -1,7 +1,10 @@
 use anchor_lang::prelude::*;
+use anchor_spl::associated_token::AssociatedToken;
+use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 use crate::constants::TABLE_SEED;
 use crate::error::ErrorCode;
+use crate::escrow;
 use crate::state::{Table, TableStatus};
 
 #[derive(Accounts)]
@@ -19,26 +22,48 @@ pub struct CreateTable<'info> {
     )]
     pub table: Account<'info, Table>,
 
+    /// The token both players stake. The app uses USDC; any mint works.
+    pub mint: InterfaceAccount<'info, Mint>,
+
+    #[account(mut, token::mint = mint, token::authority = creator,
+              token::token_program = token_program)]
+    pub creator_token: InterfaceAccount<'info, TokenAccount>,
+
+    /// Created here: the Table PDA's token account for `mint`.
+    #[account(
+        init,
+        payer = creator,
+        associated_token::mint = mint,
+        associated_token::authority = table,
+        associated_token::token_program = token_program,
+    )]
+    pub vault: InterfaceAccount<'info, TokenAccount>,
+
+    pub token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
 
-/// Opens a table and records which collectible the creator will stake.
-/// Nothing is escrowed yet: that happens once both players accept the stakes.
+/// Opens a table and puts the creator's stake in the vault. The invited
+/// opponent matches it with join_table. Until then, cancel_table refunds it.
 pub fn create_table_handler(
     ctx: Context<CreateTable>,
     table_id: u64,
     opponent: Pubkey,
-    creator_nft: Pubkey,
+    stake: u64,
 ) -> Result<()> {
-    let creator = ctx.accounts.creator.key();
-    require_keys_neq!(opponent, creator, ErrorCode::OpponentIsCreator);
+    let a = &ctx.accounts;
+    require_keys_neq!(opponent, a.creator.key(), ErrorCode::OpponentIsCreator);
+    require!(stake > 0, ErrorCode::ZeroStake);
+
+    escrow::deposit(&a.creator, &a.creator_token, &a.vault, &a.mint, &a.token_program, stake)?;
 
     ctx.accounts.table.set_inner(Table {
         table_id,
-        creator,
+        creator: ctx.accounts.creator.key(),
         opponent,
-        creator_nft,
-        opponent_nft: None,
+        mint: ctx.accounts.mint.key(),
+        stake,
         status: TableStatus::WaitingForOpponent,
         bump: ctx.bumps.table,
     });

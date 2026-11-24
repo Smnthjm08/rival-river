@@ -8,27 +8,26 @@ pub struct Table {
     pub table_id: u64,
     pub creator: Pubkey,
     pub opponent: Pubkey,
-    /// Mint of the collectible the creator stakes.
-    pub creator_nft: Pubkey,
-    /// Mint of the collectible the opponent stakes; set when they join.
-    pub opponent_nft: Option<Pubkey>,
+    /// The token both players stake (USDC in the app).
+    pub mint: Pubkey,
+    /// What each player puts in, in the mint's smallest unit (USDC has 6
+    /// decimals, so 1 USDC = 1_000_000). The winner takes twice this.
+    pub stake: u64,
     pub status: TableStatus,
     pub bump: u8,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug, InitSpace)]
 pub enum TableStatus {
-    /// Created; waiting for the invited player to pick their collectible.
+    /// Creator's stake in the vault; waiting for the opponent to match it.
     WaitingForOpponent,
-    /// Both collectibles chosen; waiting for both to lock them in escrow.
-    ReadyToLock,
-    /// Collectibles in escrow; match not started.
+    /// Both stakes in the vault; init_game hasn't run yet.
     Locked,
-    /// Match running on the ephemeral rollup.
+    /// Game created: hands are played (on the rollup) until someone wins.
     InPlay,
     /// Winner paid out.
     Settled,
-    /// Collectibles returned to their owners.
+    /// Cancelled before the opponent joined; creator's stake returned.
     Refunded,
 }
 

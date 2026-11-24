@@ -1,5 +1,6 @@
 pub mod constants;
 pub mod error;
+pub mod escrow;
 pub mod instructions;
 pub mod state;
 
@@ -25,9 +26,17 @@ pub mod rival_river {
         ctx: Context<CreateTable>,
         table_id: u64,
         opponent: Pubkey,
-        creator_nft: Pubkey,
+        stake: u64,
     ) -> Result<()> {
-        create_table::create_table_handler(ctx, table_id, opponent, creator_nft)
+        create_table::create_table_handler(ctx, table_id, opponent, stake)
+    }
+
+    pub fn join_table(ctx: Context<JoinTable>) -> Result<()> {
+        join_table::join_table_handler(ctx)
+    }
+
+    pub fn cancel_table(ctx: Context<CancelTable>) -> Result<()> {
+        cancel_table::cancel_table_handler(ctx)
     }
 
     pub fn init_game(ctx: Context<InitGame>) -> Result<()> {
@@ -36,6 +45,11 @@ pub mod rival_river {
 
     pub fn delegate_game(ctx: Context<DelegateGame>) -> Result<()> {
         delegate_game::delegate_game_handler(ctx)
+    }
+
+    /// After undelegate_game, once the match has a winner.
+    pub fn settle(ctx: Context<Settle>) -> Result<()> {
+        settle::settle_handler(ctx)
     }
 
     // ---- Private ephemeral rollup: instructions/rollup/ ----
