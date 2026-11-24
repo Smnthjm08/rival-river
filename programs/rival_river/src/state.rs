@@ -41,12 +41,53 @@ pub struct Game {
     pub table: Pubkey,
     /// [creator, opponent], copied from the Table so instructions running on
     /// the rollup can check who's playing without reading the Table on Solana.
+    /// Every [_; 2] below uses the same order.
     pub players: [Pubkey; 2],
+    /// 0 before the first hand, 1..=6 during the match, 7+ for sudden death.
     pub hand_number: u8,
     /// Set by init_permissions. Until then every account on the private
     /// rollup is public, so no secrets (and therefore no cards) before it.
     pub permissions_ready: bool,
+
+    // ---- Chips. Always: stacks + bets + pot == 2 * STARTING_STACK ----
+    /// Chips each player has behind (not yet bet).
+    pub stacks: [u16; 2],
+    /// Chips each player has put in on the current street.
+    pub bets: [u16; 2],
+    /// Chips from finished streets of this hand.
+    pub pot: u16,
+
+    // ---- Turn order ----
+    /// Index of the button. Heads-up: the button posts the small blind,
+    /// acts first preflop and last on every later street.
+    pub dealer: u8,
+    /// Index of the player whose turn it is.
+    pub to_act: u8,
+    /// Who has acted on this street. A street ends once both have acted
+    /// and bets are equal; a raise resets the other player's flag.
+    pub acted: [bool; 2],
+
+    pub phase: Phase,
+    /// Community cards (see poker.rs). Flop = 0..3, turn = 3, river = 4.
+    /// Public by design: a card here is face up.
+    pub board: [u8; 5],
+    /// Index of the match winner, once there is one.
+    pub winner: Option<u8>,
     pub bump: u8,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug, InitSpace)]
+pub enum Phase {
+    /// No hand in progress: start_hand starts the next one.
+    Waiting,
+    /// Blinds posted; waiting for both secrets and the shuffle.
+    Dealing,
+    Preflop,
+    Flop,
+    Turn,
+    River,
+    /// Someone won the match; nothing more to play.
+    Finished,
 }
 
 /// The shuffled deck for the current hand. Lives at ["deck", game].

@@ -44,8 +44,8 @@ pub mod rival_river {
         init_permissions::init_permissions_handler(ctx)
     }
 
-    pub fn next_hand(ctx: Context<NextHand>) -> Result<()> {
-        next_hand::next_hand_handler(ctx)
+    pub fn start_hand(ctx: Context<StartHand>) -> Result<()> {
+        start_hand::start_hand_handler(ctx)
     }
 
     pub fn undelegate_game(ctx: Context<UndelegateGame>) -> Result<()> {

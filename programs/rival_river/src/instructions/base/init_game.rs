@@ -3,8 +3,8 @@ use anchor_lang::system_program::{transfer, Transfer};
 use ephemeral_rollups_sdk::access_control::structs::EphemeralPermission;
 use ephemeral_rollups_sdk::ephemeral_accounts::rent;
 
-use crate::constants::{DECK_SEED, GAME_SEED, HAND_SEED, MAX_PERMISSION_MEMBERS};
-use crate::state::{Deck, Game, Hand, Table};
+use crate::constants::{DECK_SEED, GAME_SEED, HAND_SEED, MAX_PERMISSION_MEMBERS, STARTING_STACK};
+use crate::state::{Deck, Game, Hand, Phase, Table};
 
 #[derive(Accounts)]
 pub struct InitGame<'info> {
@@ -66,6 +66,15 @@ pub fn init_game_handler(ctx: Context<InitGame>) -> Result<()> {
         players: [table.creator, table.opponent],
         hand_number: 0,
         permissions_ready: false,
+        stacks: [STARTING_STACK; 2],
+        bets: [0; 2],
+        pot: 0,
+        dealer: 0, // creator has the button on hand 1
+        to_act: 0,
+        acted: [false; 2],
+        phase: Phase::Waiting,
+        board: [0; 5],
+        winner: None,
         bump: ctx.bumps.game,
     });
     ctx.accounts.deck.set_inner(Deck {

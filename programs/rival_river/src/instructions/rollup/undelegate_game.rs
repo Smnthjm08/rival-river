@@ -4,7 +4,7 @@ use ephemeral_rollups_sdk::ephem::{FoldableIntentBuilder, MagicIntentBundleBuild
 
 use crate::constants::{DECK_SEED, GAME_SEED, HAND_SEED};
 use crate::error::ErrorCode;
-use crate::state::{Deck, Game, Hand};
+use crate::state::{Deck, Game, Hand, Phase};
 
 /// Runs on the rollup. `#[commit]` appends `magic_context` and `magic_program`,
 /// the accounts the rollup uses to schedule writes back to Solana.
@@ -62,7 +62,8 @@ pub fn undelegate_game_handler(ctx: Context<UndelegateGame>) -> Result<()> {
 }
 
 /// Solana is public: anything committed there can be read by anyone. Clear
-/// every card nobody has seen and every unused secret before it leaves the rollup.
+/// every card nobody has seen and every unused secret before it leaves the rollup,
+/// and call off any hand in progress (it can't finish without its cards).
 fn wipe_secrets(game: &mut Game, deck: &mut Deck, creator: &mut Hand, opponent: &mut Hand) {
     // The deck order reveals every undealt card (and both players' hands).
     deck.cards = [0; 52];
@@ -78,6 +79,19 @@ fn wipe_secrets(game: &mut Game, deck: &mut Deck, creator: &mut Hand, opponent: 
         // A secret submitted for a shuffle that never ran.
         hand.secret = [0; 32];
         hand.has_secret = false;
+    }
+
+    // The cards are gone, so the hand can't finish: call it off and give back
+    // what each player put in. Streets only end with equal bets, so the pot
+    // holds the same amount from each player. hand_number stays, so the
+    // called-off hand still counts and the next VRF caller_seed is new.
+    if !matches!(game.phase, Phase::Waiting | Phase::Finished) {
+        for i in 0..2 {
+            game.stacks[i] += game.bets[i] + game.pot / 2;
+        }
+        game.bets = [0; 2];
+        game.pot = 0;
+        game.phase = Phase::Waiting;
     }
 
     // Permissions live only on the rollup. Make the next delegation run

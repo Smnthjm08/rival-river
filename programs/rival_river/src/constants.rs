@@ -37,3 +37,13 @@ pub const ER_VALIDATOR: Pubkey =
 #[cfg(feature = "localnet")]
 pub const ER_VALIDATOR: Pubkey =
     Pubkey::from_str_const("mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev");
+
+/// Chips each player starts the match with.
+pub const STARTING_STACK: u16 = 100;
+
+/// Hands in a match before the chip leader wins.
+pub const MAX_HANDS: u8 = 6;
+
+/// (small blind, big blind) for hands 1..=6. Sudden-death hands reuse the last level.
+pub const BLINDS: [(u16, u16); MAX_HANDS as usize] =
+    [(5, 10), (10, 20), (20, 40), (30, 60), (40, 80), (50, 100)];

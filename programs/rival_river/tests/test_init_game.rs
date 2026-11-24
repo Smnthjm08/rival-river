@@ -4,7 +4,7 @@ use {
         InstructionData, ToAccountMetas,
     },
     litesvm::LiteSVM,
-    rival_river::state::{Deck, Game, Hand, Table},
+    rival_river::state::{Deck, Game, Hand, Phase, Table},
     rival_river::constants::{DECK_SEED, GAME_SEED, HAND_SEED, TABLE_SEED},
     solana_keypair::Keypair,
     solana_message::{Message, VersionedMessage},
@@ -92,6 +92,10 @@ fn creator_opens_game_for_their_table() {
     let game = Game::try_deserialize(&mut account.data.as_slice()).unwrap();
     assert_eq!(game.table, table);
     assert_eq!(game.hand_number, 0);
+    assert_eq!(game.stacks, [100, 100]);
+    assert_eq!((game.bets, game.pot), ([0, 0], 0));
+    assert_eq!(game.phase, Phase::Waiting);
+    assert_eq!(game.winner, None);
 
     let account = svm.get_account(&pda(&[DECK_SEED, game_key.as_ref()])).unwrap();
     let deck = Deck::try_deserialize(&mut account.data.as_slice()).unwrap();

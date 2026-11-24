@@ -16,4 +16,8 @@ pub enum ErrorCode {
     WrongHand,
     #[msg("Run init_permissions first: until then the rollup accounts are public")]
     PermissionsMissing,
+    #[msg("A hand is already in progress")]
+    HandInProgress,
+    #[msg("No hand is waiting for cards: run start_hand first")]
+    NotDealing,
 }

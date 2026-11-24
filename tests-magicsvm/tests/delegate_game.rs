@@ -13,7 +13,7 @@ use {
         },
     },
     magicsvm::{MagicSVM, TransactionTarget::{self, Base, Ephemeral}},
-    rival_river::{accounts, constants::{DECK_SEED, GAME_SEED, HAND_SEED, TABLE_SEED}, instruction, state::Game},
+    rival_river::{accounts, constants::{DECK_SEED, GAME_SEED, HAND_SEED, TABLE_SEED}, instruction, state::{Game, Phase}},
     solana_address::Address,
     solana_compute_budget_interface::ComputeBudgetInstruction,
     solana_instruction::{AccountMeta, Instruction},
@@ -230,11 +230,11 @@ fn read_game(svm: &MagicSVM, target: TransactionTarget, game: Pubkey) -> Game {
     Game::try_deserialize(&mut raw_data(svm, target, game).as_slice()).unwrap()
 }
 
-fn next_hand(s: &mut Setup, signer: &Keypair) -> bool {
+fn start_hand(s: &mut Setup, signer: &Keypair) -> bool {
     let game = s.game;
     send(&mut s.svm, Ephemeral, signer, ix(
-        instruction::NextHand {},
-        accounts::NextHand { player: key(signer), game },
+        instruction::StartHand {},
+        accounts::StartHand { player: key(signer), game },
     ))
 }
 
@@ -269,17 +269,17 @@ fn rollup_changes_land_back_on_solana() {
     let mut s = delegated();
     let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
 
-    // Both players play on the rollup. Solana's copy doesn't change yet.
-    assert!(next_hand(&mut s, &creator));
-    assert!(next_hand(&mut s, &opponent));
-    assert_eq!(read_game(&s.svm, Ephemeral, s.game).hand_number, 2);
+    // A hand starts on the rollup. Solana's copy doesn't change yet.
+    assert!(start_hand(&mut s, &creator));
+    assert!(!start_hand(&mut s, &opponent), "hand 1 is still in progress");
+    assert_eq!(read_game(&s.svm, Ephemeral, s.game).hand_number, 1);
     assert_eq!(read_game(&s.svm, Base, s.game).hand_number, 0);
 
     // Undelegate: data is written back and ownership returns to our program.
     assert!(undelegate_game(&mut s, &creator));
     assert_eq!(owner(&s.svm, Base, s.game), rival_river::id());
     let game = read_game(&s.svm, Base, s.game);
-    assert_eq!(game.hand_number, 2);
+    assert_eq!(game.hand_number, 1);
     assert_eq!(game.players, [key(&s.creator), key(&s.opponent)]);
 }
 
@@ -289,7 +289,7 @@ fn stranger_cannot_play_or_undelegate() {
     let stranger = Keypair::new();
     s.svm.airdrop(&stranger.pubkey(), 1_000_000_000).unwrap();
 
-    assert!(!next_hand(&mut s, &stranger));
+    assert!(!start_hand(&mut s, &stranger));
     assert!(!undelegate_game(&mut s, &stranger));
     assert_eq!(owner(&s.svm, Base, s.game), Pubkey::new_from_array(DELEGATION_PROGRAM_ID.to_bytes()));
 }
@@ -298,13 +298,37 @@ fn stranger_cannot_play_or_undelegate() {
 fn game_is_locked_on_solana_while_delegated() {
     let mut s = delegated();
     let creator = s.creator.insecure_clone();
-    // Sending next_hand to Solana instead of the rollup fails: Solana's copy is
+    // Sending start_hand to Solana instead of the rollup fails: Solana's copy is
     // owned by the delegation program, so our program can't write to it there.
     let game = s.game;
     assert!(!send(&mut s.svm, Base, &creator, ix(
-        instruction::NextHand {},
-        accounts::NextHand { player: key(&creator), game },
+        instruction::StartHand {},
+        accounts::StartHand { player: key(&creator), game },
     )));
+}
+
+// ---- Starting a hand ---------------------------------------------------------
+
+/// stacks + bets + pot: chips are never created or destroyed.
+fn total_chips(g: &Game) -> u16 {
+    g.stacks.iter().sum::<u16>() + g.bets.iter().sum::<u16>() + g.pot
+}
+
+#[test]
+fn start_hand_posts_the_blinds() {
+    let mut s = delegated();
+    let opponent = s.opponent.insecure_clone();
+    assert_eq!(read_game(&s.svm, Ephemeral, s.game).phase, Phase::Waiting);
+
+    assert!(start_hand(&mut s, &opponent));
+    let g = read_game(&s.svm, Ephemeral, s.game);
+    assert_eq!(g.hand_number, 1);
+    // Hand 1: creator has the button, posts the 5 small blind and acts first.
+    assert_eq!((g.dealer, g.to_act), (0, 0));
+    assert_eq!(g.bets, [5, 10]);
+    assert_eq!(g.stacks, [95, 90]);
+    assert_eq!(g.phase, Phase::Dealing);
+    assert_eq!(total_chips(&g), 200);
 }
 
 // ---- Secrets + VRF shuffle + dealing ---------------------------------------
@@ -409,6 +433,7 @@ fn shuffle_deals_two_cards_to_each_player() {
     assert!(deck.shuffled && !deck.pending);
     assert_full_deck(deck.cards);
     assert_ne!(deck.cards, core::array::from_fn(|i| i as u8), "deck wasn't shuffled");
+    assert_eq!(read_game(&s.svm, Ephemeral, s.game).phase, Phase::Preflop);
 
     // Dealt alternately from the top; the board will start at card 4.
     let (c, o) = (read_hand(&s.svm, Ephemeral, s.hand_creator), read_hand(&s.svm, Ephemeral, s.hand_opponent));
@@ -464,20 +489,30 @@ fn only_one_shuffle_at_a_time() {
 }
 
 #[test]
-fn each_hand_gets_a_new_deck_and_needs_new_secrets() {
+fn shuffle_needs_a_started_hand() {
+    let mut s = delegated();
+    let creator = s.creator.insecure_clone();
+    assert!(init_permissions(&mut s, &creator));
+    both_secrets(&mut s);
+    assert!(!request_shuffle(&mut s, &creator), "no blinds posted yet");
+    assert!(start_hand(&mut s, &creator));
+    assert!(request_shuffle(&mut s, &creator));
+}
+
+// TODO: once fold ends a hand, bring back "each hand gets a new deck and
+// needs new secrets" (deal, fold, start_hand, deal again).
+#[test]
+fn no_reshuffle_mid_hand() {
     let mut s = private();
     let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
-
     shuffle_and_deal(&mut s);
-    let first = read_deck(&s.svm, Ephemeral, s.deck).cards;
+    let dealt = read_deck(&s.svm, Ephemeral, s.deck).cards;
 
-    assert!(next_hand(&mut s, &creator));
-    assert!(!request_shuffle(&mut s, &opponent), "last hand's secrets were used up");
-    shuffle_and_deal(&mut s);
-    let second = read_deck(&s.svm, Ephemeral, s.deck).cards;
-
-    assert_full_deck(second);
-    assert_ne!(first, second);
+    // Even with fresh secrets from both, the hand's cards can't be redrawn.
+    both_secrets(&mut s);
+    assert!(!request_shuffle(&mut s, &opponent));
+    assert!(!start_hand(&mut s, &creator), "hand 1 is still in progress");
+    assert_eq!(read_deck(&s.svm, Ephemeral, s.deck).cards, dealt);
 }
 
 #[test]
@@ -496,17 +531,18 @@ fn nobody_can_call_the_callback_with_their_own_randomness() {
     let mut s = private();
     both_secrets(&mut s);
     let attacker = s.creator.insecure_clone();
-    let (deck, hand_creator, hand_opponent) = (s.deck, s.hand_creator, s.hand_opponent);
+    let (game, deck, hand_creator, hand_opponent) = (s.game, s.deck, s.hand_creator, s.hand_opponent);
 
     // Pretend to be the VRF program: wrong signer.
     assert!(!send(&mut s.svm, Ephemeral, &attacker, ix(
         instruction::CallbackShuffle { randomness: [0u8; 32] },
-        accounts::CallbackShuffle { deck, hand_creator, hand_opponent, vrf_program_identity: key(&attacker) },
+        accounts::CallbackShuffle { game, deck, hand_creator, hand_opponent, vrf_program_identity: key(&attacker) },
     )));
     // Name the real VRF identity without its signature: must fail too.
     let mut forged = ix(
         instruction::CallbackShuffle { randomness: [0u8; 32] },
         accounts::CallbackShuffle {
+            game,
             deck,
             hand_creator,
             hand_opponent,
@@ -560,11 +596,13 @@ fn init_permissions_with(s: &mut Setup, signer: &Keypair, permissions: [Pubkey; 
     ))
 }
 
-/// delegated() + init_permissions: ready for secrets and shuffles.
+/// delegated() + init_permissions + start_hand: hand 1's blinds are posted,
+/// ready for secrets and the shuffle.
 fn private() -> Setup {
     let mut s = delegated();
     let creator = s.creator.insecure_clone();
     assert!(init_permissions(&mut s, &creator));
+    assert!(start_hand(&mut s, &creator));
     s
 }
 
@@ -693,6 +731,12 @@ fn undelegate_after_a_deal_leaves_no_cards_on_solana() {
     shuffle_and_deal(&mut s);
     assert!(undelegate_game(&mut s, &creator));
     assert_nothing_secret_on_solana(&s);
+
+    // The hand can't finish without its cards: called off, blinds returned.
+    let g = read_game(&s.svm, Base, s.game);
+    assert_eq!(g.phase, Phase::Waiting);
+    assert_eq!((g.stacks, g.bets, g.pot), ([100, 100], [0, 0], 0));
+    assert_eq!(g.hand_number, 1, "a called-off hand still counts");
 }
 
 #[test]

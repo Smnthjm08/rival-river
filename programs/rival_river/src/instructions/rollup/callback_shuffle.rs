@@ -3,7 +3,7 @@ use ephemeral_rollups_sdk::anchor::vrf_callback;
 
 use crate::error::ErrorCode;
 use crate::poker;
-use crate::state::{Deck, Hand};
+use crate::state::{Deck, Game, Hand, Phase};
 
 /// Called by the VRF program, never by players. `#[vrf_callback]` appends
 /// `vrf_program_identity: Signer`, a key only the VRF program can sign for,
@@ -11,6 +11,9 @@ use crate::state::{Deck, Hand};
 #[vrf_callback]
 #[derive(Accounts)]
 pub struct CallbackShuffle<'info> {
+    #[account(mut, constraint = game.key() == deck.game @ ErrorCode::WrongHand)]
+    pub game: Account<'info, Game>,
+
     #[account(mut)]
     pub deck: Account<'info, Deck>,
 
@@ -60,5 +63,8 @@ pub fn callback_shuffle_handler(ctx: Context<CallbackShuffle>, randomness: [u8; 
     deck.next = 4;
     deck.shuffled = true;
     deck.pending = false;
+
+    // Both players have cards: betting starts (to_act was set by start_hand).
+    a.game.phase = Phase::Preflop;
     Ok(())
 }

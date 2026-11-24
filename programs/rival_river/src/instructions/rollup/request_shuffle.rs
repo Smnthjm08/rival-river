@@ -9,7 +9,7 @@ use ephemeral_rollups_sdk::vrf::types::SerializableAccountMeta;
 
 use crate::constants::{DECK_SEED, GAME_SEED, HAND_SEED};
 use crate::error::ErrorCode;
-use crate::state::{Deck, Game, Hand};
+use crate::state::{Deck, Game, Hand, Phase};
 
 /// Runs on the rollup. `#[vrf]` appends program_identity, vrf_program,
 /// slot_hashes and system_program, and generates `invoke_signed_vrf()`.
@@ -19,7 +19,10 @@ pub struct RequestShuffle<'info> {
     #[account(mut, constraint = game.players.contains(&player.key()) @ ErrorCode::NotAPlayer)]
     pub player: Signer<'info>,
 
-    #[account(seeds = [GAME_SEED, game.table.as_ref()], bump = game.bump)]
+    /// Only once start_hand has posted the blinds, and only once per hand:
+    /// no reshuffling after seeing your hole cards.
+    #[account(seeds = [GAME_SEED, game.table.as_ref()], bump = game.bump,
+              constraint = game.phase == Phase::Dealing @ ErrorCode::NotDealing)]
     pub game: Account<'info, Game>,
 
     #[account(mut, seeds = [DECK_SEED, game.key().as_ref()], bump = deck.bump)]
@@ -65,6 +68,7 @@ pub fn request_shuffle_handler(ctx: Context<RequestShuffle>) -> Result<()> {
         // The accounts the oracle passes to callback_shuffle, in the order of
         // its accounts struct.
         accounts_metas: Some(vec![
+            meta(game.key()),
             meta(a.deck.key()),
             meta(a.hand_creator.key()),
             meta(a.hand_opponent.key()),
