@@ -13,7 +13,7 @@ use crate::state::{Deck, Game, Hand};
 /// Runs on the private rollup, after delegate_game. Creates one permission
 /// per account, which decides which wallets the rollup's RPC lets read it:
 ///
-///   Game          both players
+///   Game          both players (account data only, not its transactions)
 ///   Deck          nobody
 ///   creator Hand  creator only
 ///   opponent Hand opponent only
@@ -76,6 +76,14 @@ fn reader(pubkey: Pubkey) -> Member {
     Member { flags: TX_LOGS_FLAG | TX_MESSAGE_FLAG | TX_BALANCES_FLAG, pubkey }
 }
 
+/// A member who can read the account's data but none of its transactions.
+/// For Game: every transaction includes it, so with TX_MESSAGE_FLAG a player
+/// might see the other's submit_secret instruction data (their secret).
+/// Membership alone is what lets them read the account.
+fn data_reader(pubkey: Pubkey) -> Member {
+    Member { flags: 0, pubkey }
+}
+
 pub fn init_permissions_handler(ctx: Context<InitPermissions>) -> Result<()> {
     let a = &ctx.accounts;
     let game_key = a.game.key();
@@ -91,7 +99,7 @@ pub fn init_permissions_handler(ctx: Context<InitPermissions>) -> Result<()> {
             a.game.to_account_info(),
             a.game_permission.to_account_info(),
             &[GAME_SEED, a.game.table.as_ref(), &game_bump],
-            vec![reader(creator), reader(opponent)],
+            vec![data_reader(creator), data_reader(opponent)],
         ),
         (
             a.deck.to_account_info(),

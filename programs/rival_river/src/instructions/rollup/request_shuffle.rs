@@ -73,6 +73,9 @@ pub fn request_shuffle_handler(ctx: Context<RequestShuffle>) -> Result<()> {
             meta(a.hand_creator.key()),
             meta(a.hand_opponent.key()),
         ]),
+        // Comes back as callback_shuffle's `hand_number`, so an answer to an
+        // older request can't deal a later hand.
+        callback_args: Some(vec![game.hand_number]),
         ..Default::default()
     });
     ctx.accounts

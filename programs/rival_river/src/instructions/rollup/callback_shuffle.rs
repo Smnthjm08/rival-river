@@ -11,10 +11,16 @@ use crate::state::{Deck, Game, Hand, Phase};
 #[vrf_callback]
 #[derive(Accounts)]
 pub struct CallbackShuffle<'info> {
-    #[account(mut, constraint = game.key() == deck.game @ ErrorCode::WrongHand)]
+    /// Only while a hand is waiting for its cards. A late answer (say, to a
+    /// request made before the game was undelegated) must not re-deal a hand
+    /// that's already being played.
+    #[account(mut, constraint = game.key() == deck.game @ ErrorCode::WrongHand,
+              constraint = game.phase == Phase::Dealing @ ErrorCode::NotDealing)]
     pub game: Account<'info, Game>,
 
-    #[account(mut)]
+    /// `pending`: answers only a request that's still open (undelegate
+    /// clears it).
+    #[account(mut, constraint = deck.pending @ ErrorCode::NoShufflePending)]
     pub deck: Account<'info, Deck>,
 
     #[account(mut, constraint = hand_creator.game == deck.game @ ErrorCode::WrongHand)]
@@ -31,8 +37,14 @@ pub struct CallbackShuffle<'info> {
 /// Step 2 of 2: the VRF program verified the oracle's proof and hands us the
 /// random bytes. Mix in both secrets, shuffle, deal two hole cards each.
 /// Don't `msg!` the seed or the cards: anyone who sees them knows the deck.
-pub fn callback_shuffle_handler(ctx: Context<CallbackShuffle>, randomness: [u8; 32]) -> Result<()> {
+/// `hand_number` is the request's callback_args: the hand it was made for.
+pub fn callback_shuffle_handler(
+    ctx: Context<CallbackShuffle>,
+    randomness: [u8; 32],
+    hand_number: u8,
+) -> Result<()> {
     let a = ctx.accounts;
+    require!(hand_number == a.game.hand_number, ErrorCode::StaleShuffle);
     require!(
         a.hand_creator.has_secret && a.hand_opponent.has_secret,
         ErrorCode::SecretsMissing

@@ -17,7 +17,15 @@ pub struct UndelegateGame<'info> {
     )]
     pub payer: Signer<'info>,
 
-    #[account(mut, seeds = [GAME_SEED, game.table.as_ref()], bump = game.bump)]
+    /// Only while no cards are live. Mid-hand, undelegating calls the hand
+    /// off and returns everyone's chips, so a player who is behind could use
+    /// it instead of folding. In Dealing nobody has seen a card yet, and
+    /// leaving is the way out of a VRF answer that never arrives.
+    #[account(
+        mut, seeds = [GAME_SEED, game.table.as_ref()], bump = game.bump,
+        constraint = matches!(game.phase, Phase::Waiting | Phase::Dealing | Phase::Finished)
+            @ ErrorCode::HandInProgress,
+    )]
     pub game: Account<'info, Game>,
 
     #[account(mut, seeds = [DECK_SEED, game.key().as_ref()], bump = deck.bump)]
@@ -81,10 +89,11 @@ fn wipe_secrets(game: &mut Game, deck: &mut Deck, creator: &mut Hand, opponent: 
         hand.has_secret = false;
     }
 
-    // The cards are gone, so the hand can't finish: call it off and give back
-    // what each player put in. Streets only end with equal bets, so the pot
-    // holds the same amount from each player. hand_number stays, so the
-    // called-off hand still counts and the next VRF caller_seed is new.
+    // Undelegating while Dealing (blinds posted, no cards yet): the hand
+    // can't continue, so call it off and give back the blinds. hand_number
+    // stays, so the called-off hand still counts and the next VRF
+    // caller_seed is new. (The pot is still empty here; adding half of it
+    // keeps this right if a later phase is ever allowed.)
     if !matches!(game.phase, Phase::Waiting | Phase::Finished) {
         for i in 0..2 {
             game.stacks[i] += game.bets[i] + game.pot / 2;

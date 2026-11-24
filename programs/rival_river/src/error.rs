@@ -46,4 +46,8 @@ pub enum ErrorCode {
     MatchNotFinished,
     #[msg("Winnings can only go to the winner's token account")]
     NotTheWinner,
+    #[msg("No shuffle was requested")]
+    NoShufflePending,
+    #[msg("This randomness was requested for a different hand")]
+    StaleShuffle,
 }

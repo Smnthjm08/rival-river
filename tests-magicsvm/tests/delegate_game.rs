@@ -615,12 +615,12 @@ fn nobody_can_call_the_callback_with_their_own_randomness() {
 
     // Pretend to be the VRF program: wrong signer.
     assert!(!send(&mut s.svm, Ephemeral, &attacker, ix(
-        instruction::CallbackShuffle { randomness: [0u8; 32] },
+        instruction::CallbackShuffle { randomness: [0u8; 32], hand_number: 1 },
         accounts::CallbackShuffle { game, deck, hand_creator, hand_opponent, vrf_program_identity: key(&attacker) },
     )));
     // Name the real VRF identity without its signature: must fail too.
     let mut forged = ix(
-        instruction::CallbackShuffle { randomness: [0u8; 32] },
+        instruction::CallbackShuffle { randomness: [0u8; 32], hand_number: 1 },
         accounts::CallbackShuffle {
             game,
             deck,
@@ -759,6 +759,28 @@ fn permissions_give_each_account_the_right_readers() {
     assert_eq!(readers(&s.svm, s.hand_opponent), (true, vec![o], false), "opponent's Hand");
 }
 
+/// (member, flags) for an account's permission, without the program's default entry.
+fn member_flags(svm: &MagicSVM, account: Pubkey) -> Vec<(Pubkey, u8)> {
+    let acc = svm.get_account_for(Ephemeral, &addr(permission_of(account))).unwrap();
+    let p = EphemeralPermission::from_bytes(&acc.data).unwrap();
+    p.members[1..].iter().map(|m| (m.pubkey, m.flags)).collect()
+}
+
+#[test]
+fn players_see_game_data_but_not_its_transactions() {
+    use ephemeral_rollups_sdk::access_control::structs::{TX_BALANCES_FLAG, TX_LOGS_FLAG, TX_MESSAGE_FLAG};
+    let mut s = delegated();
+    let creator = s.creator.insecure_clone();
+    assert!(init_permissions(&mut s, &creator));
+    let (c, o) = (key(&s.creator), key(&s.opponent));
+    // Every transaction includes Game, so transaction flags here could show a
+    // player the other's submit_secret data. Membership alone gives reads.
+    assert_eq!(member_flags(&s.svm, s.game), vec![(c, 0), (o, 0)]);
+    let own = TX_LOGS_FLAG | TX_MESSAGE_FLAG | TX_BALANCES_FLAG;
+    assert_eq!(member_flags(&s.svm, s.hand_creator), vec![(c, own)]);
+    assert_eq!(member_flags(&s.svm, s.hand_opponent), vec![(o, own)]);
+}
+
 #[test]
 fn init_permissions_can_be_retried() {
     let mut s = delegated();
@@ -809,14 +831,38 @@ fn undelegate_after_a_deal_leaves_no_cards_on_solana() {
     let mut s = private();
     let creator = s.creator.insecure_clone();
     shuffle_and_deal(&mut s);
+    assert!(!undelegate_game(&mut s, &creator), "cards are live");
+    // Once the hand is over its cards are still in Deck and Hands.
+    assert!(act(&mut s, &creator, Action::Fold));
     assert!(undelegate_game(&mut s, &creator));
     assert_nothing_secret_on_solana(&s);
+    let g = read_game(&s.svm, Base, s.game);
+    assert_eq!((g.phase, g.stacks), (Phase::Waiting, [95, 105]));
+}
 
-    // The hand can't finish without its cards: called off, blinds returned.
+#[test]
+fn undelegate_while_dealing_calls_the_hand_off() {
+    let mut s = private(); // blinds posted, no cards yet
+    let opponent = s.opponent.insecure_clone();
+    assert!(undelegate_game(&mut s, &opponent));
     let g = read_game(&s.svm, Base, s.game);
     assert_eq!(g.phase, Phase::Waiting);
     assert_eq!((g.stacks, g.bets, g.pot), ([100, 100], [0, 0], 0));
     assert_eq!(g.hand_number, 1, "a called-off hand still counts");
+}
+
+#[test]
+fn cannot_undelegate_to_escape_a_hand() {
+    let mut s = preflop();
+    let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    assert!(act(&mut s, &creator, Action::Raise { to: 50 }));
+    assert!(act(&mut s, &opponent, Action::Call));
+    // Opponent doesn't like the flop. Leaving would hand back their 50.
+    assert!(!undelegate_game(&mut s, &opponent));
+    assert!(!undelegate_game(&mut s, &creator));
+    let g = read_game(&s.svm, Ephemeral, s.game);
+    assert_eq!((g.phase, g.pot, g.stacks), (Phase::Flop, 100, [50, 50]));
+    assert_eq!(owner(&s.svm, Base, s.game), Pubkey::new_from_array(DELEGATION_PROGRAM_ID.to_bytes()));
 }
 
 #[test]
@@ -1074,4 +1120,79 @@ fn cannot_settle_an_unfinished_match() {
     let creator_token = ata(key(&s.creator), s.mint);
     assert!(!settle(&mut s, creator_token));
     assert_eq!(balance(&s.svm, ata(s.table, s.mint)), Some(2 * STAKE));
+}
+
+// ---- VRF answers are tied to their request ------------------------------------
+
+use anchor_lang::AccountSerialize;
+
+/// Rewrites a rollup account in place, to set up states that are hard to reach
+/// (e.g. a request that was overtaken by events before the oracle answered).
+fn edit_ephemeral<T: AccountDeserialize + AccountSerialize>(s: &mut Setup, account: Pubkey, f: impl FnOnce(&mut T)) {
+    let mut acc = s.svm.ephemeral().get_account(&addr(account)).unwrap();
+    let mut value = T::try_deserialize(&mut acc.data.as_slice()).unwrap();
+    f(&mut value);
+    let mut data = Vec::new();
+    value.try_serialize(&mut data).unwrap();
+    acc.data[..data.len()].copy_from_slice(&data);
+    s.svm.ephemeral_mut().set_account(addr(account), acc).unwrap();
+}
+
+/// Lets the oracle answer; returns whether its callback succeeded.
+fn oracle_answers(s: &mut Setup) -> bool {
+    let slot = s.svm.get_sysvar::<Clock>().slot;
+    let results = s.svm.warp_to_slot(slot + 1);
+    assert_eq!(results.len(), 1, "one request was queued");
+    results[0].is_ok()
+}
+
+/// Secrets in, shuffle requested, oracle not answered yet.
+fn requested() -> Setup {
+    let mut s = private();
+    let creator = s.creator.insecure_clone();
+    both_secrets(&mut s);
+    assert!(request_shuffle(&mut s, &creator));
+    s
+}
+
+fn assert_not_dealt(s: &Setup) {
+    assert!(!read_deck(&s.svm, Ephemeral, s.deck).shuffled);
+    assert!(!read_hand(&s.svm, Ephemeral, s.hand_creator).dealt);
+    assert!(!read_hand(&s.svm, Ephemeral, s.hand_opponent).dealt);
+}
+
+#[test]
+fn answer_for_an_earlier_hand_is_refused() {
+    let mut s = requested();
+    // The game moved on to hand 2 before hand 1's answer arrived.
+    let game = s.game;
+    edit_ephemeral::<Game>(&mut s, game, |g| g.hand_number = 2);
+    assert!(!oracle_answers(&mut s));
+    assert_not_dealt(&s);
+}
+
+#[test]
+fn answer_without_an_open_request_is_refused() {
+    let mut s = requested();
+    // As undelegate leaves it: request cleared, answer still on its way.
+    let deck = s.deck;
+    edit_ephemeral::<Deck>(&mut s, deck, |d| d.pending = false);
+    assert!(!oracle_answers(&mut s));
+    assert_not_dealt(&s);
+}
+
+#[test]
+fn answer_cannot_redeal_a_hand_in_play() {
+    let mut s = requested();
+    let game = s.game;
+    edit_ephemeral::<Game>(&mut s, game, |g| g.phase = Phase::Flop);
+    assert!(!oracle_answers(&mut s));
+    assert_not_dealt(&s);
+}
+
+#[test]
+fn answer_for_this_hand_deals() {
+    let mut s = requested();
+    assert!(oracle_answers(&mut s));
+    assert_eq!(read_game(&s.svm, Ephemeral, s.game).phase, Phase::Preflop);
 }

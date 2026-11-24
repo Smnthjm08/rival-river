@@ -78,7 +78,11 @@ pub mod rival_river {
         request_shuffle::request_shuffle_handler(ctx)
     }
 
-    pub fn callback_shuffle(ctx: Context<CallbackShuffle>, randomness: [u8; 32]) -> Result<()> {
-        callback_shuffle::callback_shuffle_handler(ctx, randomness)
+    pub fn callback_shuffle(
+        ctx: Context<CallbackShuffle>,
+        randomness: [u8; 32],
+        hand_number: u8,
+    ) -> Result<()> {
+        callback_shuffle::callback_shuffle_handler(ctx, randomness, hand_number)
     }
 }
