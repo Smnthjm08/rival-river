@@ -20,4 +20,18 @@ pub enum ErrorCode {
     HandInProgress,
     #[msg("No hand is waiting for cards: run start_hand first")]
     NotDealing,
+    #[msg("No betting round is in progress")]
+    NotBetting,
+    #[msg("It's the other player's turn")]
+    NotYourTurn,
+    #[msg("There's a bet to call: call, raise or fold")]
+    CannotCheck,
+    #[msg("Nothing to call: check or bet")]
+    NothingToCall,
+    #[msg("Raise must be at least the big blind or the last raise, unless all-in")]
+    RaiseTooSmall,
+    #[msg("Not enough chips for that bet")]
+    NotEnoughChips,
+    #[msg("Your opponent is all-in: call or fold")]
+    OpponentAllIn,
 }

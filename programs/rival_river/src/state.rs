@@ -66,11 +66,17 @@ pub struct Game {
     /// Who has acted on this street. A street ends once both have acted
     /// and bets are equal; a raise resets the other player's flag.
     pub acted: [bool; 2],
+    /// Smallest legal raise on this street: the big blind, or the biggest
+    /// raise so far if that's larger.
+    pub min_raise: u16,
 
     pub phase: Phase,
     /// Community cards (see poker.rs). Flop = 0..3, turn = 3, river = 4.
     /// Public by design: a card here is face up.
     pub board: [u8; 5],
+    /// Both players' hole cards, [creator, opponent], once a hand goes to
+    /// showdown. Cleared by start_hand. Folded hands are never shown.
+    pub shown: Option<[[u8; 2]; 2]>,
     /// Index of the match winner, once there is one.
     pub winner: Option<u8>,
     pub bump: u8,

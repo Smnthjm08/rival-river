@@ -72,8 +72,10 @@ pub fn init_game_handler(ctx: Context<InitGame>) -> Result<()> {
         dealer: 0, // creator has the button on hand 1
         to_act: 0,
         acted: [false; 2],
+        min_raise: 0,
         phase: Phase::Waiting,
         board: [0; 5],
+        shown: None,
         winner: None,
         bump: ctx.bumps.game,
     });

@@ -48,6 +48,10 @@ pub mod rival_river {
         start_hand::start_hand_handler(ctx)
     }
 
+    pub fn act(ctx: Context<Act>, action: Action) -> Result<()> {
+        act::act_handler(ctx, action)
+    }
+
     pub fn undelegate_game(ctx: Context<UndelegateGame>) -> Result<()> {
         undelegate_game::undelegate_game_handler(ctx)
     }
