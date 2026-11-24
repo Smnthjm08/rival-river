@@ -19,7 +19,7 @@ pub struct StartHand<'info> {
 /// request_shuffle, and callback_shuffle moves the hand to Preflop.
 pub fn start_hand_handler(ctx: Context<StartHand>) -> Result<()> {
     let game = &mut ctx.accounts.game;
-    game.hand_number += 1;
+    game.hand_number = game.hand_number.checked_add(1).ok_or(ErrorCode::MatchTooLong)?;
     // The button alternates: creator on odd hands, opponent on even.
     game.dealer = (game.hand_number - 1) % 2;
     // Sudden-death hands (7+) stay at the last level.

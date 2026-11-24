@@ -11,9 +11,13 @@ use {
 
 pub const DECIMALS: u8 = 6;
 
-/// A fresh mint, like devnet USDC (6 decimals).
+/// A fake USDC mint (6 decimals) at the real address the program requires.
 pub fn create_mint(svm: &mut LiteSVM) -> Pubkey {
-    let mint = Pubkey::new_unique();
+    create_mint_at(svm, rival_river::constants::USDC_MINT)
+}
+
+/// A 6-decimal mint at `mint`.
+pub fn create_mint_at(svm: &mut LiteSVM, mint: Pubkey) -> Pubkey {
     let mut data = vec![0u8; 82];
     // mint_authority: None, supply: 0
     data[44] = DECIMALS;

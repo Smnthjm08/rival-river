@@ -38,6 +38,11 @@ pub const ER_VALIDATOR: Pubkey =
 pub const ER_VALIDATOR: Pubkey =
     Pubkey::from_str_const("mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev");
 
+/// The only stake token: devnet USDC (mainnet would be EPjFWdd5…).
+/// Tests write a fake mint at this address.
+pub const USDC_MINT: Pubkey =
+    Pubkey::from_str_const("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
+
 /// Seconds to act (or submit a secret) before claim_timeout is allowed.
 pub const TURN_SECONDS: i64 = 30;
 
@@ -53,3 +58,14 @@ pub const MAX_HANDS: u8 = 6;
 /// (small blind, big blind) for hands 1..=6. Sudden-death hands reuse the last level.
 pub const BLINDS: [(u16, u16); MAX_HANDS as usize] =
     [(5, 10), (10, 20), (20, 40), (30, 60), (40, 80), (50, 100)];
+
+#[cfg(all(test, not(feature = "localnet")))]
+mod tests {
+    use super::*;
+
+    /// The build that gets deployed must delegate to the devnet TEE.
+    #[test]
+    fn deploy_build_pins_the_tee_validator() {
+        assert_eq!(ER_VALIDATOR.to_string(), "MTEWGuqxUpYZGFJQcp8tLN7x5v9BSeoFHYWQQ3n3xzo");
+    }
+}

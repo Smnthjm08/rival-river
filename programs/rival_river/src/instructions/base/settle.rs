@@ -13,6 +13,7 @@ use crate::state::{Deck, Game, Hand, Phase, Table, TableStatus};
 pub struct Settle<'info> {
     #[account(
         mut,
+        close = creator,
         has_one = creator,
         has_one = mint,
         constraint = table.status == TableStatus::InPlay @ ErrorCode::TableNotInPlay,
@@ -50,7 +51,7 @@ pub struct Settle<'info> {
               associated_token::token_program = token_program)]
     pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    /// Paid for the vault and the game accounts, so gets their rent back.
+    /// Paid for the table, vault and game accounts, so gets their rent back.
     #[account(mut)]
     pub creator: SystemAccount<'info>,
 

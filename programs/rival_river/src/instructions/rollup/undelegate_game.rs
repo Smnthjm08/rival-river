@@ -7,6 +7,7 @@ use ephemeral_rollups_sdk::ephem::{FoldableIntentBuilder, MagicIntentBundleBuild
 
 use crate::constants::{DECK_SEED, GAME_SEED, HAND_SEED};
 use crate::error::ErrorCode;
+use crate::instructions::rollup::act::end_hand;
 use crate::state::{Deck, Game, Hand, Phase};
 
 /// Runs on the rollup. `#[commit]` appends `magic_context` and `magic_program`,
@@ -184,18 +185,16 @@ fn wipe_secrets(game: &mut Game, deck: &mut Deck, creator: &mut Hand, opponent: 
         hand.has_secret = false;
     }
 
-    // Undelegating while Dealing (blinds posted, no cards yet): the hand
-    // can't continue, so call it off and give back the blinds. hand_number
-    // stays, so the called-off hand still counts and the next VRF
-    // caller_seed is new. (The pot is still empty here; adding half of it
-    // keeps this right if a later phase is ever allowed.)
+    // Undelegating while Dealing (blinds posted, no cards yet): call the hand
+    // off and give back the blinds. It still counts, so after hand 6 the chip
+    // leader wins as usual, and the next VRF caller_seed is new.
     if !matches!(game.phase, Phase::Waiting | Phase::Finished) {
         for i in 0..2 {
             game.stacks[i] += game.bets[i] + game.pot / 2;
         }
-        game.bets = [0; 2];
         game.pot = 0;
-        game.phase = Phase::Waiting;
+        game.bets = [0; 2];
+        end_hand(game);
     }
 
     // Permissions are closed below. Make the next delegation run

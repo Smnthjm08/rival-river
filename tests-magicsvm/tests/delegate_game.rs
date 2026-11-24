@@ -158,9 +158,9 @@ fn write_token_account(svm: &mut MagicSVM, address: Pubkey, data: Vec<u8>) {
     svm.set_account(addr(address), account).unwrap();
 }
 
-/// A fresh 6-decimal mint (82-byte SPL Mint: no authority, initialized).
+/// A fake USDC mint at the address the program requires (82-byte SPL Mint, 6 decimals).
 fn create_mint(svm: &mut MagicSVM) -> Pubkey {
-    let mint = Pubkey::new_unique();
+    let mint = rival_river::constants::USDC_MINT;
     let mut data = vec![0u8; 82];
     data[44] = 6; // decimals
     data[45] = 1; // is_initialized
@@ -1140,7 +1140,7 @@ fn winner_takes_both_stakes() {
     assert_eq!(balance(&s.svm, tokens[winner]), Some(2 * STAKE));
     assert_eq!(balance(&s.svm, tokens[1 - winner]), Some(0));
     assert_eq!(balance(&s.svm, vault), None, "vault closed");
-    assert_eq!(read_table(&s.svm, s.table).status, TableStatus::Settled);
+    assert!(closed(&s, s.table), "table closed too");
     assert!(!settle(&mut s, tokens[winner]), "only once");
 }
 
@@ -1268,7 +1268,7 @@ fn settled_table_cannot_be_delegated() {
     let winner_token = ata([key(&s.creator), key(&s.opponent)][winner], s.mint);
     assert!(settle(&mut s, winner_token));
     let ixs = delegate_game_ixs(&s, &creator);
-    assert_eq!(error_name(&mut s.svm, Base, &creator, &ixs).as_deref(), Some("TableNotInPlay"));
+    assert!(error_name(&mut s.svm, Base, &creator, &ixs).is_some(), "the table is gone");
 }
 
 #[test]
@@ -1446,6 +1446,9 @@ fn refund(s: &mut Setup) -> Option<String> {
         accounts::Refund {
             table: s.table,
             game: s.game,
+            deck: s.deck,
+            hand_creator: s.hand_creator,
+            hand_opponent: s.hand_opponent,
             mint: s.mint,
             creator_token: ata(key(&s.creator), s.mint),
             opponent_token: ata(key(&s.opponent), s.mint),
@@ -1482,4 +1485,187 @@ fn finished_match_is_settled_not_refunded() {
     let winner_token = ata([key(&s.creator), key(&s.opponent)][winner], s.mint);
     assert!(settle(&mut s, winner_token));
     assert!(refund(&mut s).is_some(), "settled tables can't be refunded");
+}
+
+// ---- Edge cases: short stacks, end of match, closing up ---------------------------
+
+fn closed(s: &Setup, account: Pubkey) -> bool {
+    s.svm.get_account_for(Base, &addr(account)).map_or(true, |a| a.lamports == 0)
+}
+
+fn set_stacks(s: &mut Setup, stacks: [u16; 2]) {
+    let game = s.game;
+    edit_ephemeral::<Game>(s, game, |g| g.stacks = stacks);
+}
+
+/// None if it succeeded, else the program's error name.
+fn act_err(s: &mut Setup, signer: &Keypair, action: Action) -> Option<String> {
+    let i = ix(
+        instruction::Act { action },
+        accounts::Act { player: key(signer), game: s.game, deck: s.deck, hand_creator: s.hand_creator, hand_opponent: s.hand_opponent },
+    );
+    error_name(&mut s.svm, Ephemeral, signer, &[i])
+}
+
+/// The stacks the showdown should leave: [creator wins, opponent wins, split].
+fn expect_showdown(s: &Setup, outcomes: [[u16; 2]; 3]) {
+    let [c, o] = scores(s);
+    let expected = match c.cmp(&o) {
+        std::cmp::Ordering::Greater => outcomes[0],
+        std::cmp::Ordering::Less => outcomes[1],
+        std::cmp::Ordering::Equal => outcomes[2],
+    };
+    let g = read_game(&s.svm, Ephemeral, s.game);
+    assert_eq!(g.stacks, expected);
+    assert_eq!(total_chips(&g), 200);
+    assert_eq!(g.phase == Phase::Finished, g.stacks.contains(&0));
+}
+
+#[test]
+fn short_all_in_call_gets_the_unmatched_chips_back() {
+    let mut s = preflop(); // bets [5, 10]
+    set_stacks(&mut s, [170, 15]);
+    let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    assert!(act(&mut s, &creator, Action::Raise { to: 175 }));
+    assert!(act(&mut s, &opponent, Action::Call)); // can only add 15
+    // 25 each is matched (pot 50); the creator's other 150 comes back.
+    expect_showdown(&s, [[200, 0], [150, 50], [175, 25]]);
+}
+
+/// delegated() + permissions, with `stacks` set before hand 1's blinds.
+fn hand_one_with(stacks: [u16; 2]) -> Setup {
+    let mut s = delegated();
+    let creator = s.creator.insecure_clone();
+    assert!(init_permissions(&mut s, &creator));
+    set_stacks(&mut s, stacks);
+    assert!(start_hand(&mut s, &creator));
+    s
+}
+
+#[test]
+fn small_blind_that_cannot_cover_is_all_in() {
+    let mut s = hand_one_with([3, 197]); // creator is the small blind
+    let g = read_game(&s.svm, Ephemeral, s.game);
+    assert_eq!((g.bets, g.stacks, g.to_act), ([3, 10], [0, 187], 1), "big blind acts first");
+    shuffle_and_deal(&mut s);
+    let opponent = s.opponent.insecure_clone();
+    assert!(act(&mut s, &opponent, Action::Check));
+    // 3 each matched (pot 6), 7 back to the big blind, board run out.
+    expect_showdown(&s, [[6, 194], [0, 200], [3, 197]]);
+}
+
+#[test]
+fn big_blind_that_cannot_cover_is_all_in() {
+    let mut s = hand_one_with([196, 4]); // opponent is the big blind
+    shuffle_and_deal(&mut s);
+    let creator = s.creator.insecure_clone();
+    assert_eq!(read_game(&s.svm, Ephemeral, s.game).bets, [5, 4]);
+    assert_eq!(act_err(&mut s, &creator, Action::Raise { to: 20 }).as_deref(), Some("OpponentAllIn"));
+    assert!(act(&mut s, &creator, Action::Check));
+    expect_showdown(&s, [[200, 0], [192, 8], [196, 4]]);
+}
+
+#[test]
+fn chip_leader_wins_after_hand_six() {
+    let mut s = delegated();
+    let creator = s.creator.insecure_clone();
+    assert!(init_permissions(&mut s, &creator));
+    let game = s.game;
+    edit_ephemeral::<Game>(&mut s, game, |g| { g.hand_number = 5; g.stacks = [120, 80]; });
+    assert!(start_hand(&mut s, &creator)); // hand 6: opponent's button, 50/100
+    shuffle_and_deal(&mut s);
+    let g = read_game(&s.svm, Ephemeral, s.game);
+    assert_eq!((g.hand_number, g.dealer, g.bets), (6, 1, [100, 50]));
+    let opponent = s.opponent.insecure_clone();
+    assert!(act(&mut s, &opponent, Action::Fold));
+    let g = read_game(&s.svm, Ephemeral, s.game);
+    assert_eq!((g.phase, g.winner, g.stacks), (Phase::Finished, Some(0), [170, 30]));
+}
+
+#[test]
+fn level_stacks_after_hand_six_play_sudden_death() {
+    let mut s = delegated();
+    let creator = s.creator.insecure_clone();
+    assert!(init_permissions(&mut s, &creator));
+    let game = s.game;
+    edit_ephemeral::<Game>(&mut s, game, |g| g.hand_number = 6);
+    assert!(start_hand(&mut s, &creator));
+    let g = read_game(&s.svm, Ephemeral, s.game);
+    assert_eq!((g.hand_number, g.bets, g.phase), (7, [50, 100], Phase::Dealing), "last blind level");
+}
+
+#[test]
+fn called_off_hand_six_still_ends_the_match() {
+    let mut s = delegated();
+    let creator = s.creator.insecure_clone();
+    assert!(init_permissions(&mut s, &creator));
+    let game = s.game;
+    edit_ephemeral::<Game>(&mut s, game, |g| { g.hand_number = 5; g.stacks = [120, 80]; });
+    assert!(start_hand(&mut s, &creator)); // hand 6, Dealing
+    assert!(undelegate_game(&mut s, &creator));
+    let g = read_game(&s.svm, Base, s.game);
+    assert_eq!((g.phase, g.winner, g.stacks), (Phase::Finished, Some(0), [120, 80]));
+    let creator_token = ata(key(&s.creator), s.mint);
+    assert!(settle(&mut s, creator_token));
+    assert_eq!(balance(&s.svm, creator_token), Some(2 * STAKE));
+}
+
+#[test]
+fn match_cannot_run_past_255_hands() {
+    let mut s = delegated();
+    let creator = s.creator.insecure_clone();
+    let game = s.game;
+    edit_ephemeral::<Game>(&mut s, game, |g| g.hand_number = u8::MAX);
+    let i = ix(instruction::StartHand {}, accounts::StartHand { player: key(&creator), game });
+    assert_eq!(error_name(&mut s.svm, Ephemeral, &creator, &[i]).as_deref(), Some("MatchTooLong"));
+}
+
+#[test]
+fn minimum_bet_resets_each_street() {
+    let mut s = preflop();
+    let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    assert!(act(&mut s, &creator, Action::Raise { to: 40 })); // raise by 30
+    assert!(act(&mut s, &opponent, Action::Call));
+    assert_eq!(read_game(&s.svm, Ephemeral, s.game).min_raise, 10, "back to the big blind");
+    assert_eq!(act_err(&mut s, &opponent, Action::Raise { to: 5 }).as_deref(), Some("RaiseTooSmall"));
+    assert!(act(&mut s, &opponent, Action::Raise { to: 10 }));
+    assert_eq!(act_err(&mut s, &creator, Action::Check).as_deref(), Some("CannotCheck"));
+}
+
+#[test]
+fn call_needs_something_to_call_and_act_needs_a_betting_round() {
+    let mut s = private(); // Dealing
+    let creator = s.creator.insecure_clone();
+    assert_eq!(act_err(&mut s, &creator, Action::Call).as_deref(), Some("NotBetting"));
+    shuffle_and_deal(&mut s);
+    assert!(act(&mut s, &creator, Action::Call)); // limp
+    let opponent = s.opponent.insecure_clone();
+    assert_eq!(act_err(&mut s, &opponent, Action::Call).as_deref(), Some("NothingToCall"));
+}
+
+#[test]
+fn refund_after_a_mid_match_undelegate_closes_everything() {
+    let mut s = private();
+    let creator = s.creator.insecure_clone();
+    assert!(undelegate_game(&mut s, &creator)); // back on Solana, Waiting
+    advance_clock(&mut s, MATCH_SECONDS + 1);
+    let accounts = [s.table, s.game, s.deck, s.hand_creator, s.hand_opponent];
+    let rent: u64 = accounts.iter().map(|a| s.svm.get_balance(&addr(*a)).unwrap()).sum();
+    let before = s.svm.get_balance(&creator.pubkey()).unwrap();
+    assert_eq!(refund(&mut s), None);
+    let tokens = [key(&s.creator), key(&s.opponent)].map(|p| ata(p, s.mint));
+    assert_eq!(tokens.map(|t| balance(&s.svm, t)), [Some(STAKE), Some(STAKE)]);
+    for a in accounts {
+        assert!(closed(&s, a), "{a} not closed");
+    }
+    assert!(s.svm.get_balance(&creator.pubkey()).unwrap() >= before + rent);
+}
+
+#[test]
+fn refund_while_delegated_keeps_the_table() {
+    let mut s = preflop();
+    advance_clock(&mut s, MATCH_SECONDS + 1);
+    assert_eq!(refund(&mut s), None);
+    // The game still lives on the rollup, so its Table address stays taken.
+    assert_eq!(read_table(&s.svm, s.table).status, TableStatus::Refunded);
 }

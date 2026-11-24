@@ -184,7 +184,7 @@ fn showdown(game: &mut Game, hands: [&Hand; 2]) {
 }
 
 /// Clears the table and decides whether the match is over.
-fn end_hand(game: &mut Game) {
+pub(crate) fn end_hand(game: &mut Game) {
     game.pot = 0;
     game.bets = [0; 2];
     game.acted = [false; 2];

@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
-use crate::constants::TABLE_SEED;
+use crate::constants::{TABLE_SEED, USDC_MINT};
 use crate::error::ErrorCode;
 use crate::escrow;
 use crate::state::{Table, TableStatus};
@@ -22,16 +22,19 @@ pub struct CreateTable<'info> {
     )]
     pub table: Account<'info, Table>,
 
-    /// The token both players stake. The app uses USDC; any mint works.
+    /// Only USDC: any other mint could be fake, or a Token-2022 mint whose
+    /// extensions let its owner drain or freeze the vault.
+    #[account(address = USDC_MINT @ ErrorCode::WrongMint)]
     pub mint: InterfaceAccount<'info, Mint>,
 
     #[account(mut, token::mint = mint, token::authority = creator,
               token::token_program = token_program)]
     pub creator_token: InterfaceAccount<'info, TokenAccount>,
 
-    /// Created here: the Table PDA's token account for `mint`.
+    /// The Table PDA's token account for `mint`. `init_if_needed`: anyone can
+    /// create an ATA, so `init` would let them block this table in advance.
     #[account(
-        init,
+        init_if_needed,
         payer = creator,
         associated_token::mint = mint,
         associated_token::authority = table,

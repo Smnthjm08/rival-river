@@ -58,4 +58,8 @@ pub enum ErrorCode {
     RefundTooEarly,
     #[msg("Nothing to refund: the table was never joined, or is already settled or refunded")]
     NothingToRefund,
+    #[msg("Stakes must be in USDC")]
+    WrongMint,
+    #[msg("Too many sudden-death hands: wait for the refund deadline")]
+    MatchTooLong,
 }

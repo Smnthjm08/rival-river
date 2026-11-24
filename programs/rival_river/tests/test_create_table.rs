@@ -9,7 +9,7 @@ use {
         associated_token::{self, get_associated_token_address},
         token,
     },
-    common::{balance, create_mint, fund},
+    common::{balance, create_mint, create_mint_at, fund},
     litesvm::LiteSVM,
     rival_river::constants::TABLE_SEED,
     rival_river::state::{Table, TableStatus},
@@ -215,7 +215,7 @@ fn creator_can_cancel_before_anyone_joins() {
 
     assert!(!cancel_table(&mut s, &opponent, table));
     assert!(cancel_table(&mut s, &creator, table));
-    assert_eq!(read_table(&s.svm, table).status, TableStatus::Refunded);
+    assert!(s.svm.get_account(&table).map_or(true, |a| a.lamports == 0), "table closed");
     assert_eq!(wallet(&s, &creator), 3 * STAKE);
     assert!(
         s.svm
@@ -235,12 +235,17 @@ fn refund(s: &mut Setup, table: Pubkey) -> bool {
         &rival_river::id(),
     )
     .0;
+    let pda = |seeds: &[&[u8]]| Pubkey::find_program_address(seeds, &rival_river::id()).0;
+    use rival_river::constants::{DECK_SEED, HAND_SEED};
     let ix = Instruction::new_with_bytes(
         rival_river::id(),
         &rival_river::instruction::Refund {}.data(),
         rival_river::accounts::Refund {
             table,
             game,
+            deck: pda(&[DECK_SEED, game.as_ref()]),
+            hand_creator: pda(&[HAND_SEED, game.as_ref(), creator.as_ref()]),
+            hand_opponent: pda(&[HAND_SEED, game.as_ref(), opponent.as_ref()]),
             mint: s.mint,
             creator_token: get_associated_token_address(&creator, &s.mint),
             opponent_token: get_associated_token_address(&opponent, &s.mint),
@@ -274,7 +279,7 @@ fn stakes_come_back_if_the_game_never_starts() {
     assert!(!refund(&mut s, table), "too early");
     advance_clock(&mut s.svm, rival_river::constants::MATCH_SECONDS + 1);
     assert!(refund(&mut s, table));
-    assert_eq!(read_table(&s.svm, table).status, TableStatus::Refunded);
+    assert!(s.svm.get_account(&table).map_or(true, |a| a.lamports == 0), "table closed");
     assert_eq!(
         (wallet(&s, &creator), wallet(&s, &opponent)),
         (3 * STAKE, 3 * STAKE)
@@ -291,4 +296,25 @@ fn unjoined_table_is_cancelled_not_refunded() {
     advance_clock(&mut s.svm, rival_river::constants::MATCH_SECONDS + 1);
     assert!(!refund(&mut s, table));
     assert!(cancel_table(&mut s, &creator, table));
+}
+
+#[test]
+fn only_usdc_can_be_staked() {
+    let mut s = setup();
+    let fake = create_mint_at(&mut s.svm, Pubkey::new_unique());
+    fund(&mut s.svm, s.creator.pubkey(), fake, STAKE);
+    s.mint = fake;
+    let opponent = s.opponent.pubkey();
+    assert!(!create_table(&mut s, 1, opponent, STAKE));
+}
+
+#[test]
+fn table_opens_even_if_someone_created_its_vault_first() {
+    let mut s = setup();
+    let table = table_pda(&s.creator.pubkey(), 1);
+    // Anyone can create the table PDA's token account before the creator does.
+    let vault = fund(&mut s.svm, table, s.mint, 0);
+    let opponent = s.opponent.pubkey();
+    assert!(create_table(&mut s, 1, opponent, STAKE));
+    assert_eq!(balance(&s.svm, vault), STAKE);
 }

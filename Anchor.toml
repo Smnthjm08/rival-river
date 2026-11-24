@@ -8,6 +8,9 @@ skip-lint = false
 [programs.localnet]
 rival_river = "7XjxcXUqsLRzXWxdVa2TR2jmHXzNrTW1Z7neQGYii1gi"
 
+[programs.devnet]
+rival_river = "7XjxcXUqsLRzXWxdVa2TR2jmHXzNrTW1Z7neQGYii1gi"
+
 [provider]
 cluster = "localnet"
 wallet = "~/.config/solana/id.json"

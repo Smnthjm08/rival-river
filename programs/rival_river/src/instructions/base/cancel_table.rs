@@ -13,6 +13,7 @@ pub struct CancelTable<'info> {
     /// Only before the opponent joins: after that, both stakes are locked.
     #[account(
         mut,
+        close = creator,
         has_one = creator,
         has_one = mint,
         constraint = table.status == TableStatus::WaitingForOpponent @ ErrorCode::TableNotOpen,
@@ -32,7 +33,7 @@ pub struct CancelTable<'info> {
     pub token_program: Interface<'info, TokenInterface>,
 }
 
-/// The creator takes their stake back (and the vault's rent).
+/// The creator takes their stake back, plus the vault's and table's rent.
 pub fn cancel_table_handler(ctx: Context<CancelTable>) -> Result<()> {
     let a = &ctx.accounts;
     escrow::release(
