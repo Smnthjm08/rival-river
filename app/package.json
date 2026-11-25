@@ -6,10 +6,16 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "sync-idl": "cp ../target/idl/rival_river.json ../target/types/rival_river.ts lib/rival/idl/"
   },
   "dependencies": {
+    "@anchor-lang/core": "1.2.2",
     "@base-ui/react": "^1.9.0",
+    "@magicblock-labs/ephemeral-rollups-sdk": "0.18.0",
+    "@solana/spl-token": "0.4.13",
+    "@solana/web3.js": "1.99.0",
+    "buffer": "^6.0.3",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.5.2",
     "lucide-react": "^1.80.0",
@@ -17,7 +23,8 @@
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "shadcn": "^4.23.0",
-    "tw-animate-css": "^1.4.0"
+    "tw-animate-css": "^1.4.0",
+    "tweetnacl": "1.0.3"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "4.3.3",

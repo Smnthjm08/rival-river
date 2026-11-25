@@ -1,0 +1,128 @@
+// Plays one match on devnet through lib/rival, the way two browser tabs
+// would: both players' clients run their loops at the same time, so they
+// race to send the automatic steps. Counts each wallet's signing prompts.
+//
+//   cd app && bun scripts/lib-smoke.ts
+//
+// Needs ~0.2 devnet SOL and 2 * STAKE devnet USDC in the CLI wallet; the
+// opponent is ../target/smoke/opponent.json (funded by this script).
+import { Keypair, SystemProgram, type Transaction } from "@solana/web3.js";
+import {
+  createAssociatedTokenAccountIdempotentInstruction,
+  createTransferCheckedInstruction,
+  getAccount,
+  getAssociatedTokenAddressSync,
+} from "@solana/spl-token";
+import { existsSync, readFileSync } from "fs";
+import { homedir } from "os";
+import {
+  base, createTable, dueSteps, enterRollup, fetchHand, fetchMatch, finishMatch, joinTable, keypairWallet, moves,
+  programErrorName, runSteps, sendTx, startMatch, USDC_MINT, waitForRollup, type Action, type Seat, type WalletSigner,
+} from "../lib/rival";
+
+const STAKE = 10_000; // 0.01 USDC each
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const load = (p: string) => Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(p, "utf8"))));
+
+/** A keypair wallet that counts how often it's asked to sign: the popups a real wallet would show. */
+function counted(kp: Keypair) {
+  const w = keypairWallet(kp);
+  const prompts: string[] = [];
+  const wallet: WalletSigner = {
+    publicKey: w.publicKey,
+    signTransaction: <T extends Transaction>(tx: T) => (prompts.push("signTransaction"), w.signTransaction(tx)),
+    signAllTransactions: <T extends Transaction>(txs: T[]) => (prompts.push(`signAllTransactions(${txs.length})`), w.signAllTransactions(txs)),
+    signMessage: (m) => (prompts.push("signMessage"), w.signMessage(m)),
+  };
+  return { wallet, prompts };
+}
+
+const opponentPath = "../target/smoke/opponent.json";
+if (!existsSync(opponentPath)) throw new Error(`run ../scripts/smoke-devnet.ts once first, or create ${opponentPath}`);
+const C = counted(load(`${homedir()}/.config/solana/id.json`));
+const O = counted(load(opponentPath));
+const usdc = (k: Keypair | WalletSigner) => getAssociatedTokenAddressSync(USDC_MINT, k.publicKey);
+
+/** Passive for two hands (check/call down every street), then shove. */
+function choose(g: NonNullable<Awaited<ReturnType<typeof fetchMatch>>["game"]>, me: number): Action {
+  const other = 1 - me;
+  const toCall = g.bets[other] - g.bets[me];
+  if (g.handNumber > 2 && g.stacks[other] > 0 && g.bets[me] + g.stacks[me] > g.bets[other]) {
+    return { raise: { to: g.bets[me] + g.stacks[me] } };
+  }
+  return toCall > 0 ? { call: {} } : { check: {} };
+}
+
+async function play(s: Seat, name: string) {
+  const started = Date.now();
+  let lastHand = 0;
+  while (Date.now() - started < 8 * 60_000) {
+    const { game, hand } = await fetchMatch(s.tee, s.keys, s.seat);
+    if (!game) throw new Error(`${name}: can't read the game`);
+    if (game.phase === "finished") return game;
+    if (hand?.cards && game.handNumber !== lastHand) {
+      lastHand = game.handNumber;
+      console.log(`  ${name} hand ${game.handNumber}: holds ${hand.cards.map((c) => c.rank + c.suit).join(" ")}`);
+    }
+    await runSteps(s, dueSteps(game, hand, s.seat));
+    if (["preflop", "flop", "turn", "river"].includes(game.phase) && game.toAct === s.seat) {
+      const action = choose(game, s.seat);
+      // A stale snapshot: the other tab's move already changed whose turn it is.
+      await moves.act(s, action).catch((e) => {
+        if (!["NotYourTurn", "NotBetting"].includes(programErrorName(e) ?? "")) throw e;
+      });
+    }
+    await sleep(400);
+  }
+  throw new Error(`${name}: match didn't finish in 8 minutes`);
+}
+
+async function main() {
+  console.log("[0] fund the opponent");
+  const fund = [];
+  if ((await base.getBalance(O.wallet.publicKey)) < 50_000_000) {
+    fund.push(SystemProgram.transfer({ fromPubkey: C.wallet.publicKey, toPubkey: O.wallet.publicKey, lamports: 100_000_000 }));
+  }
+  fund.push(
+    createAssociatedTokenAccountIdempotentInstruction(C.wallet.publicKey, usdc(O.wallet), O.wallet.publicKey, USDC_MINT),
+    createTransferCheckedInstruction(usdc(C.wallet), USDC_MINT, usdc(O.wallet), C.wallet.publicKey, STAKE, 6),
+  );
+  await sendTx({ conn: base, ixs: fund }, load(`${homedir()}/.config/solana/id.json`));
+  C.prompts.length = 0;
+
+  console.log("[1] lobby");
+  const keys = await createTable(C.wallet, O.wallet.publicKey, STAKE);
+  console.log(`  table ${keys.table.toBase58()}`);
+  await joinTable(O.wallet, keys);
+  await startMatch(C.wallet, keys);
+  await waitForRollup(keys);
+
+  console.log("[2] both players enter the rollup at once");
+  const [sc, so] = await Promise.all([enterRollup(C.wallet, keys), enterRollup(O.wallet, keys)]);
+  const peek = await fetchHand(sc.tee, keys.handOpponent);
+  console.log(`  creator reading the opponent's Hand: ${peek === null ? "refused (good)" : "READABLE (bad)"}`);
+
+  console.log("[3] play (both loops racing)");
+  const t0 = Date.now();
+  const [final] = await Promise.all([play(sc, "creator"), play(so, "opponent")]);
+  console.log(`  finished after ${final.handNumber} hands in ${((Date.now() - t0) / 1000).toFixed(0)}s, stacks ${final.stacks}`);
+
+  console.log("[4] finish: the loser's tab does it, to show anyone can");
+  const winner = final.winner!;
+  const loser = winner === 0 ? { w: O, s: so } : { w: C, s: sc };
+  const winnerUsdc = usdc(winner === 0 ? C.wallet : O.wallet);
+  const before = Number((await getAccount(base, winnerUsdc)).amount);
+  await finishMatch(loser.w.wallet, loser.s);
+  const gained = Number((await getAccount(base, winnerUsdc)).amount) - before;
+  console.log(`  ${winner === 0 ? "creator" : "opponent"} won: +${gained / 1e6} USDC ${gained === 2 * STAKE ? "(both stakes, good)" : "(WRONG)"}`);
+
+  console.log("[5] wallet prompts");
+  console.log(`  creator  (${C.prompts.length}): ${C.prompts.join(", ")}`);
+  console.log(`  opponent (${O.prompts.length}): ${O.prompts.join(", ")}`);
+  if (peek !== null || gained !== 2 * STAKE) process.exitCode = 1;
+}
+
+main().catch((e) => {
+  console.error("\nSTOPPED:", e?.message ?? e, programErrorName(e) ?? "");
+  process.exitCode = 1;
+});
