@@ -30,8 +30,11 @@ stakes.
   otherwise folds. A player who never sends their shuffle secret forfeits
   the hand.
 - **Refunds:** the creator can cancel and take their stake back until a
-  friend joins. If a joined match isn’t settled within two hours, anyone
-  can return both stakes. A finished match can only be settled.
+  friend joins. A match has two hours from its start; after that no
+  more hands are played. Ten minutes later, if it still isn’t settled,
+  anyone can return both stakes. Those ten minutes let a match that ended
+  just before the deadline pay its winner. A finished match can only be
+  settled.
 
 ## Where MagicBlock fits
 

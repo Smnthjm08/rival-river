@@ -22,3 +22,4 @@ export * from "./actions/lobby";
 export * from "./actions/rollup";
 export * from "./actions/auto";
 export * from "./actions/finish";
+export * from "./actions/recovery";

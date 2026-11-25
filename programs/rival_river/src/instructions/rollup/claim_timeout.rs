@@ -36,6 +36,8 @@ pub fn claim_timeout_handler(ctx: Context<ClaimTimeout>) -> Result<()> {
     let a = ctx.accounts;
     let now = Clock::get()?.unix_timestamp;
     require!(now > a.game.deadline, ErrorCode::NotTimedOut);
+    // Play stops at the match deadline (see apply in act.rs); a forfeit is play too.
+    require!(now <= a.game.match_deadline, ErrorCode::MatchExpired);
 
     if a.game.phase != Phase::Dealing {
         let action = timeout_action(&a.game);

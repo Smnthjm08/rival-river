@@ -55,6 +55,12 @@ pub const START_SECONDS: i64 = 10 * 60;
 /// start late, and stall to the deadline (a 50/50 refund) whenever behind.
 pub const MATCH_SECONDS: i64 = 2 * 60 * 60;
 
+/// Seconds after the match deadline before a match in play can be refunded.
+/// Play stops at the deadline; this window lets a match that finished just
+/// before it be undelegated and settled. Without it, a loser could refund
+/// (a 50/50 split) while the winner's undelegate is still landing.
+pub const SETTLE_GRACE_SECONDS: i64 = 10 * 60;
+
 /// Chips each player starts the match with.
 pub const STARTING_STACK: u16 = 100;
 

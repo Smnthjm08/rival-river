@@ -1307,7 +1307,10 @@ fn delegation_never_commits_on_a_timer() {
 
 // ---- Turn timer (rollup) and refund deadline (Solana) ----------------------------
 
-use rival_river::constants::{MATCH_SECONDS, TURN_SECONDS};
+use rival_river::constants::{MATCH_SECONDS, SETTLE_GRACE_SECONDS, TURN_SECONDS};
+
+/// Seconds after init_game until a match in play can be refunded.
+const REFUNDABLE: i64 = MATCH_SECONDS + SETTLE_GRACE_SECONDS + 1;
 
 fn advance_clock(s: &mut Setup, seconds: i64) {
     let mut clock = s.svm.get_sysvar::<Clock>();
@@ -1457,7 +1460,7 @@ fn refund(s: &mut Setup) -> Option<String> {
 fn stakes_come_back_if_the_rollup_never_returns_the_game() {
     let mut s = preflop(); // mid-hand, still delegated
     assert_eq!(refund(&mut s).as_deref(), Some("RefundTooEarly"));
-    advance_clock(&mut s, MATCH_SECONDS + 1);
+    advance_clock(&mut s, REFUNDABLE);
     assert_eq!(refund(&mut s), None);
     let tokens = [key(&s.creator), key(&s.opponent)].map(|p| ata(p, s.mint));
     assert_eq!(tokens.map(|t| balance(&s.svm, t)), [Some(STAKE), Some(STAKE)]);
@@ -1471,7 +1474,7 @@ fn finished_match_is_settled_not_refunded() {
     let mut s = finished();
     let creator = s.creator.insecure_clone();
     assert!(undelegate_game(&mut s, &creator));
-    advance_clock(&mut s, MATCH_SECONDS + 1);
+    advance_clock(&mut s, REFUNDABLE);
     // The loser can't wait out the deadline to get their stake back.
     assert_eq!(refund(&mut s).as_deref(), Some("MatchFinished"));
     let winner = read_game(&s.svm, Base, s.game).winner.unwrap() as usize;
@@ -1625,7 +1628,7 @@ fn refund_of_a_never_delegated_game_closes_everything() {
     let mut s = setup();
     init_game(&mut s); // on Solana, Waiting: nobody delegated it
     let creator = s.creator.insecure_clone();
-    advance_clock(&mut s, MATCH_SECONDS + 1);
+    advance_clock(&mut s, REFUNDABLE);
     let accounts = [s.table, s.game, s.deck, s.hand_creator, s.hand_opponent];
     let rent: u64 = accounts.iter().map(|a| s.svm.get_balance(&addr(*a)).unwrap()).sum();
     let before = s.svm.get_balance(&creator.pubkey()).unwrap();
@@ -1641,7 +1644,7 @@ fn refund_of_a_never_delegated_game_closes_everything() {
 #[test]
 fn refund_while_delegated_keeps_the_table() {
     let mut s = preflop();
-    advance_clock(&mut s, MATCH_SECONDS + 1);
+    advance_clock(&mut s, REFUNDABLE);
     assert_eq!(refund(&mut s), None);
     // The game still lives on the rollup, so its Table address stays taken.
     assert_eq!(read_table(&s.svm, s.table).status, TableStatus::Refunded);
@@ -1767,7 +1770,7 @@ fn close_refunded_recovers_a_game_left_on_the_rollup() {
     let mut s = preflop(); // mid-hand, delegated, cards live
     let opponent = s.opponent.insecure_clone();
     assert!(!undelegate_game(&mut s, &opponent), "not before the deadline");
-    advance_clock(&mut s, MATCH_SECONDS + 1);
+    advance_clock(&mut s, REFUNDABLE);
     assert_eq!(refund(&mut s), None);
     assert_eq!(read_table(&s.svm, s.table).status, TableStatus::Refunded);
     assert!(close_refunded(&mut s).is_some(), "game still delegated");
@@ -1888,4 +1891,60 @@ fn replacing_a_session_key_retires_the_old_one() {
     assert!(submit_secret_to(&mut s, &o, ho, [2; 32]));
     assert!(!request_shuffle(&mut s, &new));
     assert!(request_shuffle(&mut s, &creator));
+}
+
+// ---- Match deadline: play stops, then a grace window to settle --------------
+
+fn start_hand_err(s: &mut Setup, signer: &Keypair) -> Option<String> {
+    let ix = ix(instruction::StartHand {}, accounts::StartHand { player: key(signer), game: s.game });
+    error_name(&mut s.svm, Ephemeral, signer, &[ix])
+}
+
+#[test]
+fn play_stops_at_the_match_deadline() {
+    let mut s = preflop();
+    let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    advance_clock(&mut s, MATCH_SECONDS + 1);
+    assert_eq!(act_err(&mut s, &creator, Action::Call).as_deref(), Some("MatchExpired"));
+    assert_eq!(claim_timeout(&mut s, &opponent).as_deref(), Some("MatchExpired"), "a timeout forfeit is play too");
+
+    let mut s = preflop(); // a fresh table, with new players
+    let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    assert!(act(&mut s, &creator, Action::Fold)); // hand 1 over: Waiting
+    advance_clock(&mut s, MATCH_SECONDS + 1);
+    assert_eq!(start_hand_err(&mut s, &opponent).as_deref(), Some("MatchExpired"));
+}
+
+#[test]
+fn dealing_forfeit_stops_at_the_match_deadline() {
+    let mut s = private(); // Dealing, nobody has sent a secret
+    let creator = s.creator.insecure_clone();
+    assert!(submit_secret(&mut s, &creator, [1; 32]));
+    advance_clock(&mut s, MATCH_SECONDS + 1);
+    assert_eq!(claim_timeout(&mut s, &creator).as_deref(), Some("MatchExpired"));
+}
+
+/// The race this window closes: the match ends just before the deadline, and
+/// the loser tries to refund (a 50/50 split) while the winner's undelegate is
+/// still landing.
+#[test]
+fn match_finished_at_the_deadline_still_settles() {
+    let mut s = finished(); // Finished, still on the rollup
+    let creator = s.creator.insecure_clone();
+    advance_clock(&mut s, MATCH_SECONDS + 1);
+    assert_eq!(refund(&mut s).as_deref(), Some("RefundTooEarly"));
+    assert!(undelegate_game(&mut s, &creator));
+    let winner = read_game(&s.svm, Base, s.game).winner.unwrap() as usize;
+    let winner_token = ata([key(&s.creator), key(&s.opponent)][winner], s.mint);
+    assert!(settle(&mut s, winner_token));
+    assert_eq!(balance(&s.svm, winner_token), Some(2 * STAKE));
+}
+
+#[test]
+fn unfinished_match_refunds_only_after_the_grace() {
+    let mut s = preflop();
+    advance_clock(&mut s, MATCH_SECONDS + SETTLE_GRACE_SECONDS);
+    assert_eq!(refund(&mut s).as_deref(), Some("RefundTooEarly"));
+    advance_clock(&mut s, 1);
+    assert_eq!(refund(&mut s), None);
 }

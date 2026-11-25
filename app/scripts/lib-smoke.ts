@@ -16,7 +16,7 @@ import {
 import { existsSync, readFileSync } from "fs";
 import { homedir } from "os";
 import {
-  base, createTable, dueSteps, enterRollup, fetchHand, fetchMatch, finishMatch, joinTable, keypairWallet, moves,
+  base, createTable, enterRollup, fetchHand, fetchMatch, finishMatch, HandTracker, joinTable, keypairWallet, moves,
   programErrorName, runSteps, sendTx, startMatch, USDC_MINT, waitForRollup, type Action, type Seat, type WalletSigner,
 } from "../lib/rival";
 
@@ -56,15 +56,25 @@ function choose(g: NonNullable<Awaited<ReturnType<typeof fetchMatch>>["game"]>, 
 async function play(s: Seat, name: string) {
   const started = Date.now();
   let lastHand = 0;
+  // A real table pauses ~4s after each hand; 1s keeps this run short.
+  const tracker = new HandTracker(s.seat, 1);
+  let reported = 0;
   while (Date.now() - started < 8 * 60_000) {
     const { game, hand } = await fetchMatch(s.tee, s.keys, s.seat);
     if (!game) throw new Error(`${name}: can't read the game`);
+    const due = tracker.due(game, hand);
+    const r = tracker.lastResult;
+    if (s.seat === 0 && r && r.handNumber !== reported) {
+      reported = r.handNumber;
+      const show = r.shown ? `showdown ${r.shown.map((h) => h.map((c) => c.rank + c.suit).join(" ")).join(" vs ")}` : "fold";
+      console.log(`  result hand ${r.handNumber}: ${show}, board ${r.board.map((c) => c.rank + c.suit).join(" ") || "-"}, won ${r.won}`);
+    }
     if (game.phase === "finished") return game;
     if (hand?.cards && game.handNumber !== lastHand) {
       lastHand = game.handNumber;
       console.log(`  ${name} hand ${game.handNumber}: holds ${hand.cards.map((c) => c.rank + c.suit).join(" ")}`);
     }
-    await runSteps(s, dueSteps(game, hand, s.seat));
+    await runSteps(s, due);
     if (["preflop", "flop", "turn", "river"].includes(game.phase) && game.toAct === s.seat) {
       const action = choose(game, s.seat);
       // A stale snapshot: the other tab's move already changed whose turn it is.
@@ -107,12 +117,12 @@ async function main() {
   const [final] = await Promise.all([play(sc, "creator"), play(so, "opponent")]);
   console.log(`  finished after ${final.handNumber} hands in ${((Date.now() - t0) / 1000).toFixed(0)}s, stacks ${final.stacks}`);
 
-  console.log("[4] finish: the loser's tab does it, to show anyone can");
+  console.log("[4] finish: both tabs at once; one settles, the other finds it done");
   const winner = final.winner!;
-  const loser = winner === 0 ? { w: O, s: so } : { w: C, s: sc };
   const winnerUsdc = usdc(winner === 0 ? C.wallet : O.wallet);
   const before = Number((await getAccount(base, winnerUsdc)).amount);
-  await finishMatch(loser.w.wallet, loser.s);
+  const sigs = await Promise.all([finishMatch(C.wallet, sc), finishMatch(O.wallet, so)]);
+  console.log(`  settle signatures: creator ${sigs[0] ?? "null (already settled)"}, opponent ${sigs[1] ?? "null (already settled)"}`);
   const gained = Number((await getAccount(base, winnerUsdc)).amount) - before;
   console.log(`  ${winner === 0 ? "creator" : "opponent"} won: +${gained / 1e6} USDC ${gained === 2 * STAKE ? "(both stakes, good)" : "(WRONG)"}`);
 

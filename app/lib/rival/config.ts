@@ -12,3 +12,6 @@ export const BASE_RPC = process.env.NEXT_PUBLIC_BASE_RPC ?? "https://rpc.magicbl
 export const ROUTER_RPC = "https://devnet-router.magicblock.app/";
 /** The private (TEE) rollup the program delegates to. */
 export const TEE_RPC = "https://devnet-tee.magicblock.app";
+
+/** Mirrors the program: refund of a match in play opens this long after its deadline. */
+export const SETTLE_GRACE_SECONDS = 10 * 60;

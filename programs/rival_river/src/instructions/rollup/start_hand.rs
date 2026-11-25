@@ -20,6 +20,9 @@ pub struct StartHand<'info> {
 /// request_shuffle, and callback_shuffle moves the hand to Preflop.
 pub fn start_hand_handler(ctx: Context<StartHand>) -> Result<()> {
     let game = &mut ctx.accounts.game;
+    let now = Clock::get()?.unix_timestamp;
+    // No new hands after the match deadline: see apply in act.rs.
+    require!(now <= game.match_deadline, ErrorCode::MatchExpired);
     game.hand_number = game.hand_number.checked_add(1).ok_or(ErrorCode::MatchTooLong)?;
     // The button alternates: creator on odd hands, opponent on even.
     game.dealer = (game.hand_number - 1) % 2;
@@ -48,6 +51,6 @@ pub fn start_hand_handler(ctx: Context<StartHand>) -> Result<()> {
         game.dealer
     };
     game.phase = Phase::Dealing;
-    game.deadline = Clock::get()?.unix_timestamp + TURN_SECONDS;
+    game.deadline = now + TURN_SECONDS;
     Ok(())
 }

@@ -1,13 +1,15 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
-use crate::constants::{DECK_SEED, GAME_SEED, HAND_SEED};
+use crate::constants::{DECK_SEED, GAME_SEED, HAND_SEED, SETTLE_GRACE_SECONDS};
 use crate::error::ErrorCode;
 use crate::escrow;
 use crate::state::{Game, Phase, Table, TableStatus};
 
 /// Runs on Solana. After the deadline, anyone can return both stakes of an
 /// unsettled match (init_game never ran, or the rollup never gave it back).
+/// For a match in play, only SETTLE_GRACE_SECONDS after it: play has stopped
+/// by then, and a finished match has had time to settle.
 #[derive(Accounts)]
 pub struct Refund<'info> {
     #[account(
@@ -54,8 +56,9 @@ pub struct Refund<'info> {
 
 pub fn refund_handler(ctx: Context<Refund>) -> Result<()> {
     let a = &ctx.accounts;
+    let grace = if a.table.status == TableStatus::InPlay { SETTLE_GRACE_SECONDS } else { 0 };
     require!(
-        Clock::get()?.unix_timestamp > a.table.deadline,
+        Clock::get()?.unix_timestamp > a.table.deadline + grace,
         ErrorCode::RefundTooEarly
     );
 

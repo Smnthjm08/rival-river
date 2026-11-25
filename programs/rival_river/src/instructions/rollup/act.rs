@@ -69,6 +69,10 @@ pub(crate) fn timeout_action(game: &Game) -> Action {
 
 /// `game.to_act` takes `action`; the caller has checked it's allowed.
 pub(crate) fn apply(game: &mut Game, deck: &Deck, hands: [&Hand; 2], action: Action) -> Result<()> {
+    // Play stops at the match deadline, so nothing can finish the match
+    // after refund might already have split the stakes.
+    let now = Clock::get()?.unix_timestamp;
+    require!(now <= game.match_deadline, ErrorCode::MatchExpired);
     let me = game.to_act as usize;
     let other = 1 - me;
     let to_call = game.bets[other].saturating_sub(game.bets[me]);
@@ -110,7 +114,7 @@ pub(crate) fn apply(game: &mut Game, deck: &Deck, hands: [&Hand; 2], action: Act
     } else {
         game.to_act = other as u8;
     }
-    game.deadline = Clock::get()?.unix_timestamp + TURN_SECONDS;
+    game.deadline = now + TURN_SECONDS;
     Ok(())
 }
 
