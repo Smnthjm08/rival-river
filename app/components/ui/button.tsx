@@ -17,6 +17,8 @@ const buttonVariants = cva(
         destructive:
           "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
         link: "text-primary underline-offset-4 hover:underline",
+        // Kit: fold reads in ember on an outline, never a filled red button.
+        fold: "border-input text-fold hover:bg-destructive/10 dark:bg-transparent",
       },
       size: {
         default:
@@ -28,6 +30,10 @@ const buttonVariants = cva(
         "icon-xs": "size-5 rounded-sm [&_svg:not([class*='size-'])]:size-2.5",
         "icon-sm": "size-6 [&_svg:not([class*='size-'])]:size-3",
         "icon-lg": "size-8 [&_svg:not([class*='size-'])]:size-4",
+        // Kit sizes: table actions and page CTAs.
+        xl: "h-12 gap-2 rounded-lg px-5 text-base font-semibold has-data-[icon=inline-end]:pr-4 has-data-[icon=inline-start]:pl-4 [&_svg:not([class*='size-'])]:size-4",
+        "2xl": "h-14 gap-2 rounded-xl px-6 text-lg font-semibold [&_svg:not([class*='size-'])]:size-5",
+        pill: "h-10 gap-2 rounded-full px-4 text-sm [&_svg:not([class*='size-'])]:size-4",
       },
     },
     defaultVariants: {
