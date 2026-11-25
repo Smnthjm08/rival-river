@@ -3,7 +3,9 @@ use anchor_lang::system_program::{transfer, Transfer};
 use ephemeral_rollups_sdk::access_control::structs::EphemeralPermission;
 use ephemeral_rollups_sdk::ephemeral_accounts::rent;
 
-use crate::constants::{DECK_SEED, GAME_SEED, HAND_SEED, MAX_PERMISSION_MEMBERS, STARTING_STACK};
+use crate::constants::{
+    DECK_SEED, GAME_SEED, HAND_SEED, MATCH_SECONDS, MAX_PERMISSION_MEMBERS, STARTING_STACK,
+};
 use crate::error::ErrorCode;
 use crate::state::{Deck, Game, Hand, Phase, Table, TableStatus};
 
@@ -60,8 +62,14 @@ pub struct InitGame<'info> {
 
 /// Creates the match-state accounts on Solana. All four get delegated to the
 /// rollup later; one game per table, enforced by the PDA seeds.
+/// Also starts the match clock: the refund deadline is MATCH_SECONDS from now.
 pub fn init_game_handler(ctx: Context<InitGame>) -> Result<()> {
+    let now = Clock::get()?.unix_timestamp;
+    // Past the start window the opponent may already be refunding: don't
+    // take that way out from under them.
+    require!(now <= ctx.accounts.table.deadline, ErrorCode::MatchExpired);
     ctx.accounts.table.status = TableStatus::InPlay;
+    ctx.accounts.table.deadline = now + MATCH_SECONDS;
     let table = &ctx.accounts.table;
     let game_key = ctx.accounts.game.key();
 
@@ -81,6 +89,7 @@ pub fn init_game_handler(ctx: Context<InitGame>) -> Result<()> {
         board: [0; 5],
         shown: None,
         deadline: 0,
+        match_deadline: table.deadline,
         winner: None,
         bump: ctx.bumps.game,
     });

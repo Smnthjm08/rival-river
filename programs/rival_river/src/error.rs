@@ -62,4 +62,8 @@ pub enum ErrorCode {
     WrongMint,
     #[msg("Too many sudden-death hands: wait for the refund deadline")]
     MatchTooLong,
+    #[msg("The deadline has passed: refund the table instead")]
+    MatchExpired,
+    #[msg("Only a refunded table can be closed this way")]
+    NotRefunded,
 }

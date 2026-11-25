@@ -7,7 +7,6 @@ use ephemeral_rollups_sdk::ephem::{FoldableIntentBuilder, MagicIntentBundleBuild
 
 use crate::constants::{DECK_SEED, GAME_SEED, HAND_SEED};
 use crate::error::ErrorCode;
-use crate::instructions::rollup::act::end_hand;
 use crate::state::{Deck, Game, Hand, Phase};
 
 /// Runs on the rollup. `#[commit]` appends `magic_context` and `magic_program`,
@@ -21,15 +20,14 @@ pub struct UndelegateGame<'info> {
     )]
     pub payer: Signer<'info>,
 
-    /// Only while no cards are live. Mid-hand, undelegating calls the hand
-    /// off and returns everyone's chips, so a player who is behind could use
-    /// it instead of folding. In Dealing nobody has seen a card yet, and
-    /// leaving is the way out of a VRF answer that never arrives.
-    #[account(
-        mut, seeds = [GAME_SEED, game.table.as_ref()], bump = game.bump,
-        constraint = matches!(game.phase, Phase::Waiting | Phase::Dealing | Phase::Finished)
-            @ ErrorCode::HandInProgress,
-    )]
+    /// Only once the match is over, or once its deadline has passed (checked
+    /// in the handler). Earlier, a player who is behind could undelegate
+    /// between hands (nothing burns a hand), wait while the other re-delegates,
+    /// and repeat until the refund deadline splits the stakes 50/50. After the
+    /// deadline the match is refundable anyway, and undelegating lets
+    /// close_refunded recover the rent. A stuck VRF answer is handled by
+    /// claim_timeout, and a dead rollup by refund.
+    #[account(mut, seeds = [GAME_SEED, game.table.as_ref()], bump = game.bump)]
     pub game: Account<'info, Game>,
 
     #[account(mut, seeds = [DECK_SEED, game.key().as_ref()], bump = deck.bump)]
@@ -73,6 +71,10 @@ pub struct UndelegateGame<'info> {
 /// program (via the callback `#[ephemeral]` added).
 pub fn undelegate_game_handler(ctx: Context<UndelegateGame>) -> Result<()> {
     let a = ctx.accounts;
+    require!(
+        a.game.phase == Phase::Finished || Clock::get()?.unix_timestamp > a.game.match_deadline,
+        ErrorCode::MatchNotFinished
+    );
     wipe_secrets(
         &mut a.game,
         &mut a.deck,
@@ -166,8 +168,7 @@ fn close_permissions(a: &UndelegateGame) -> Result<()> {
 }
 
 /// Solana is public: anything committed there can be read by anyone. Clear
-/// every card nobody has seen and every unused secret before it leaves the rollup,
-/// and call off any hand in progress (it can't finish without its cards).
+/// every card nobody has seen and every unused secret before it leaves the rollup.
 fn wipe_secrets(game: &mut Game, deck: &mut Deck, creator: &mut Hand, opponent: &mut Hand) {
     // The deck order reveals every undealt card (and both players' hands).
     deck.cards = [0; 52];
@@ -183,18 +184,6 @@ fn wipe_secrets(game: &mut Game, deck: &mut Deck, creator: &mut Hand, opponent: 
         // A secret submitted for a shuffle that never ran.
         hand.secret = [0; 32];
         hand.has_secret = false;
-    }
-
-    // Undelegating while Dealing (blinds posted, no cards yet): call the hand
-    // off and give back the blinds. It still counts, so after hand 6 the chip
-    // leader wins as usual, and the next VRF caller_seed is new.
-    if !matches!(game.phase, Phase::Waiting | Phase::Finished) {
-        for i in 0..2 {
-            game.stacks[i] += game.bets[i] + game.pot / 2;
-        }
-        game.pot = 0;
-        game.bets = [0; 2];
-        end_hand(game);
     }
 
     // Permissions are closed below. Make the next delegation run

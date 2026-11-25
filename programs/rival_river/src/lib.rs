@@ -57,6 +57,11 @@ pub mod rival_river {
         settle::settle_handler(ctx)
     }
 
+    /// After a refund that left the game on the rollup, once it's back.
+    pub fn close_refunded(ctx: Context<CloseRefunded>) -> Result<()> {
+        close_refunded::close_refunded_handler(ctx)
+    }
+
     // ---- Private ephemeral rollup: instructions/rollup/ ----
 
     pub fn init_permissions(ctx: Context<InitPermissions>) -> Result<()> {

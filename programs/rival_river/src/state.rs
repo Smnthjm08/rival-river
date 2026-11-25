@@ -14,7 +14,8 @@ pub struct Table {
     /// decimals, so 1 USDC = 1_000_000). The winner takes twice this.
     pub stake: u64,
     pub status: TableStatus,
-    /// After this (unix time), `refund` is allowed. Set by join_table.
+    /// After this (unix time), `refund` is allowed. join_table sets it to
+    /// the end of the start window, init_game to the end of the match.
     pub deadline: i64,
     pub bump: u8,
 }
@@ -80,6 +81,9 @@ pub struct Game {
     pub shown: Option<[[u8; 2]; 2]>,
     /// After this (unix time), claim_timeout is allowed.
     pub deadline: i64,
+    /// The table's refund deadline, copied so the rollup can read it. After
+    /// it, the game may be undelegated unfinished (it's refundable anyway).
+    pub match_deadline: i64,
     /// Index of the match winner, once there is one.
     pub winner: Option<u8>,
     pub bump: u8,

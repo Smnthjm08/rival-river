@@ -7,7 +7,7 @@ use ephemeral_rollups_sdk::vrf::instructions::{
 };
 use ephemeral_rollups_sdk::vrf::types::SerializableAccountMeta;
 
-use crate::constants::{DECK_SEED, GAME_SEED, HAND_SEED};
+use crate::constants::{DECK_SEED, GAME_SEED, HAND_SEED, TURN_SECONDS};
 use crate::error::ErrorCode;
 use crate::state::{Deck, Game, Hand, Phase};
 
@@ -21,7 +21,7 @@ pub struct RequestShuffle<'info> {
 
     /// Only once start_hand has posted the blinds, and only once per hand:
     /// no reshuffling after seeing your hole cards.
-    #[account(seeds = [GAME_SEED, game.table.as_ref()], bump = game.bump,
+    #[account(mut, seeds = [GAME_SEED, game.table.as_ref()], bump = game.bump,
               constraint = game.phase == Phase::Dealing @ ErrorCode::NotDealing)]
     pub game: Account<'info, Game>,
 
@@ -89,5 +89,8 @@ pub fn request_shuffle_handler(ctx: Context<RequestShuffle>) -> Result<()> {
     let deck = &mut ctx.accounts.deck;
     deck.shuffled = false;
     deck.pending = true;
+    // Give the oracle a full turn to answer before claim_timeout may clear
+    // the request.
+    ctx.accounts.game.deadline = Clock::get()?.unix_timestamp + TURN_SECONDS;
     Ok(())
 }

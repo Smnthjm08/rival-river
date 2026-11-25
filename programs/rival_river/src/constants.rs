@@ -46,7 +46,13 @@ pub const USDC_MINT: Pubkey =
 /// Seconds to act (or submit a secret) before claim_timeout is allowed.
 pub const TURN_SECONDS: i64 = 30;
 
-/// Seconds from join_table until an unsettled match can be refunded.
+/// Seconds from join_table for the creator to run init_game. After that the
+/// stakes can be refunded and the game can no longer be started.
+pub const START_SECONDS: i64 = 10 * 60;
+
+/// Seconds from init_game until an unsettled match can be refunded. Counted
+/// from the start of play, not from join_table: otherwise the creator could
+/// start late, and stall to the deadline (a 50/50 refund) whenever behind.
 pub const MATCH_SECONDS: i64 = 2 * 60 * 60;
 
 /// Chips each player starts the match with.

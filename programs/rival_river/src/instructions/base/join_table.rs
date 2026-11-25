@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
-use crate::constants::MATCH_SECONDS;
+use crate::constants::START_SECONDS;
 use crate::error::ErrorCode;
 use crate::escrow;
 use crate::state::{Table, TableStatus};
@@ -33,7 +33,8 @@ pub struct JoinTable<'info> {
 }
 
 /// The opponent matches the creator's stake. Both stakes are now locked
-/// until the match is settled.
+/// until the match is settled, or refunded if the creator doesn't start the
+/// game within START_SECONDS.
 pub fn join_table_handler(ctx: Context<JoinTable>) -> Result<()> {
     let a = &ctx.accounts;
     escrow::deposit(
@@ -46,6 +47,6 @@ pub fn join_table_handler(ctx: Context<JoinTable>) -> Result<()> {
     )?;
     let table = &mut ctx.accounts.table;
     table.status = TableStatus::Locked;
-    table.deadline = Clock::get()?.unix_timestamp + MATCH_SECONDS;
+    table.deadline = Clock::get()?.unix_timestamp + START_SECONDS;
     Ok(())
 }

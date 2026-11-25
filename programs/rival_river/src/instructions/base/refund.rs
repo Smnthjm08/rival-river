@@ -92,6 +92,7 @@ pub fn refund_handler(ctx: Context<Refund>) -> Result<()> {
     )?;
     // Close everything unless the game is still delegated: then the Table
     // stays, so its address (and the game's) can't be reused meanwhile.
+    // close_refunded closes it all once undelegate_game brings the game back.
     let delegated = !on_solana && !a.game.data_is_empty();
     let creator = a.creator.to_account_info();
     if !delegated {

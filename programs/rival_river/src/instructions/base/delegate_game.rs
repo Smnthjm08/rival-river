@@ -50,6 +50,11 @@ pub fn delegate_game_handler(ctx: Context<DelegateGame>) -> Result<()> {
     // Re-delegating a finished game would block settle.
     let game = Game::try_deserialize(&mut &ctx.accounts.game.data.borrow()[..])?;
     require!(game.phase != Phase::Finished, ErrorCode::MatchFinished);
+    // Past the deadline the match is refundable: no more play.
+    require!(
+        Clock::get()?.unix_timestamp <= ctx.accounts.table.deadline,
+        ErrorCode::MatchExpired
+    );
 
     let table = ctx.accounts.table.key();
     let (creator, opponent) = (ctx.accounts.table.creator, ctx.accounts.table.opponent);

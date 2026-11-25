@@ -337,9 +337,14 @@ fn start_hand(s: &mut Setup, signer: &Keypair) -> bool {
 }
 
 fn undelegate_game(s: &mut Setup, signer: &Keypair) -> bool {
+    let ix = undelegate_game_ix(s, signer);
+    send(&mut s.svm, Ephemeral, signer, ix)
+}
+
+fn undelegate_game_ix(s: &Setup, signer: &Keypair) -> Instruction {
     let (game, deck) = (s.game, s.deck);
     let (hand_creator, hand_opponent) = (s.hand_creator, s.hand_opponent);
-    send(&mut s.svm, Ephemeral, signer, ix(
+    ix(
         instruction::UndelegateGame {},
         accounts::UndelegateGame {
             payer: key(signer),
@@ -356,7 +361,17 @@ fn undelegate_game(s: &mut Setup, signer: &Keypair) -> bool {
             magic_program: MagicProgram::id(),
             magic_context: MAGIC_CONTEXT_ID,
         },
-    ))
+    )
+}
+
+/// Ends the match on the rollup (creator wins) without playing it out:
+/// undelegate_game only works on a finished match.
+fn force_finish(s: &mut Setup) {
+    let game = s.game;
+    edit_ephemeral::<Game>(s, game, |g| {
+        g.phase = Phase::Finished;
+        g.winner = Some(0);
+    });
 }
 
 /// init_game + delegate_game, ready for play on the rollup.
@@ -379,7 +394,10 @@ fn rollup_changes_land_back_on_solana() {
     assert_eq!(read_game(&s.svm, Ephemeral, s.game).hand_number, 1);
     assert_eq!(read_game(&s.svm, Base, s.game).hand_number, 0);
 
-    // Undelegate: data is written back and ownership returns to our program.
+    // Undelegate (once the match is over): data is written back and
+    // ownership returns to our program.
+    assert!(!undelegate_game(&mut s, &creator), "match still in progress");
+    force_finish(&mut s);
     assert!(undelegate_game(&mut s, &creator));
     assert_eq!(owner(&s.svm, Base, s.game), rival_river::id());
     let game = read_game(&s.svm, Base, s.game);
@@ -826,6 +844,7 @@ fn hands_round_trip_with_permissions_in_place() {
     let mut s = delegated();
     let creator = s.creator.insecure_clone();
     assert!(init_permissions(&mut s, &creator));
+    force_finish(&mut s);
     assert!(undelegate_game(&mut s, &creator));
     for acc in [s.game, s.deck, s.hand_creator, s.hand_opponent] {
         assert_eq!(owner(&s.svm, Base, acc), rival_river::id());
@@ -849,28 +868,13 @@ fn assert_nothing_secret_on_solana(s: &Setup) {
 }
 
 #[test]
-fn undelegate_after_a_deal_leaves_no_cards_on_solana() {
-    let mut s = private();
+fn undelegate_leaves_no_cards_or_secrets_on_solana() {
+    let mut s = finished(); // the last hand's cards are still in Deck and Hands
     let creator = s.creator.insecure_clone();
-    shuffle_and_deal(&mut s);
-    assert!(!undelegate_game(&mut s, &creator), "cards are live");
-    // Once the hand is over its cards are still in Deck and Hands.
-    assert!(act(&mut s, &creator, Action::Fold));
+    // A secret submitted after the end, for a shuffle that will never run.
+    assert!(submit_secret(&mut s, &creator, [0xAB; 32]));
     assert!(undelegate_game(&mut s, &creator));
     assert_nothing_secret_on_solana(&s);
-    let g = read_game(&s.svm, Base, s.game);
-    assert_eq!((g.phase, g.stacks), (Phase::Waiting, [95, 105]));
-}
-
-#[test]
-fn undelegate_while_dealing_calls_the_hand_off() {
-    let mut s = private(); // blinds posted, no cards yet
-    let opponent = s.opponent.insecure_clone();
-    assert!(undelegate_game(&mut s, &opponent));
-    let g = read_game(&s.svm, Base, s.game);
-    assert_eq!(g.phase, Phase::Waiting);
-    assert_eq!((g.stacks, g.bets, g.pot), ([100, 100], [0, 0], 0));
-    assert_eq!(g.hand_number, 1, "a called-off hand still counts");
 }
 
 #[test]
@@ -885,17 +889,6 @@ fn cannot_undelegate_to_escape_a_hand() {
     let g = read_game(&s.svm, Ephemeral, s.game);
     assert_eq!((g.phase, g.pot, g.stacks), (Phase::Flop, 100, [50, 50]));
     assert_eq!(owner(&s.svm, Base, s.game), Pubkey::new_from_array(DELEGATION_PROGRAM_ID.to_bytes()));
-}
-
-#[test]
-fn undelegate_mid_shuffle_leaves_no_secrets_on_solana() {
-    let mut s = private();
-    let creator = s.creator.insecure_clone();
-    // Secrets are in, the oracle hasn't answered: the worst moment to leave.
-    both_secrets(&mut s);
-    assert!(request_shuffle(&mut s, &creator));
-    assert!(undelegate_game(&mut s, &creator));
-    assert_nothing_secret_on_solana(&s);
 }
 
 // ---- Betting: act -------------------------------------------------------------
@@ -1146,10 +1139,8 @@ fn winner_takes_both_stakes() {
 
 #[test]
 fn cannot_settle_an_unfinished_match() {
-    let mut s = preflop();
-    let creator = s.creator.insecure_clone();
-    assert!(act(&mut s, &creator, Action::Fold));
-    assert!(undelegate_game(&mut s, &creator));
+    let mut s = setup();
+    init_game(&mut s); // on Solana, owned by the program, phase Waiting
     let creator_token = ata(key(&s.creator), s.mint);
     assert!(!settle(&mut s, creator_token));
     assert_eq!(balance(&s.svm, ata(s.table, s.mint)), Some(2 * STAKE));
@@ -1284,6 +1275,7 @@ fn undelegate_closes_the_permissions_and_refunds_their_rent() {
         assert!(s.svm.get_account_for(Ephemeral, &addr(permission_of(a))).is_some());
     }
 
+    force_finish(&mut s);
     assert!(undelegate_game(&mut s, &creator));
     for a in accounts {
         let p = s.svm.ephemeral().get_account(&addr(permission_of(a)));
@@ -1296,6 +1288,7 @@ fn undelegate_closes_the_permissions_and_refunds_their_rent() {
 fn undelegate_before_permissions_exist_still_works() {
     let mut s = delegated(); // no init_permissions
     let creator = s.creator.insecure_clone();
+    force_finish(&mut s);
     assert!(undelegate_game(&mut s, &creator));
     assert_eq!(owner(&s.svm, Base, s.game), rival_river::id());
 }
@@ -1595,22 +1588,6 @@ fn level_stacks_after_hand_six_play_sudden_death() {
 }
 
 #[test]
-fn called_off_hand_six_still_ends_the_match() {
-    let mut s = delegated();
-    let creator = s.creator.insecure_clone();
-    assert!(init_permissions(&mut s, &creator));
-    let game = s.game;
-    edit_ephemeral::<Game>(&mut s, game, |g| { g.hand_number = 5; g.stacks = [120, 80]; });
-    assert!(start_hand(&mut s, &creator)); // hand 6, Dealing
-    assert!(undelegate_game(&mut s, &creator));
-    let g = read_game(&s.svm, Base, s.game);
-    assert_eq!((g.phase, g.winner, g.stacks), (Phase::Finished, Some(0), [120, 80]));
-    let creator_token = ata(key(&s.creator), s.mint);
-    assert!(settle(&mut s, creator_token));
-    assert_eq!(balance(&s.svm, creator_token), Some(2 * STAKE));
-}
-
-#[test]
 fn match_cannot_run_past_255_hands() {
     let mut s = delegated();
     let creator = s.creator.insecure_clone();
@@ -1644,10 +1621,10 @@ fn call_needs_something_to_call_and_act_needs_a_betting_round() {
 }
 
 #[test]
-fn refund_after_a_mid_match_undelegate_closes_everything() {
-    let mut s = private();
+fn refund_of_a_never_delegated_game_closes_everything() {
+    let mut s = setup();
+    init_game(&mut s); // on Solana, Waiting: nobody delegated it
     let creator = s.creator.insecure_clone();
-    assert!(undelegate_game(&mut s, &creator)); // back on Solana, Waiting
     advance_clock(&mut s, MATCH_SECONDS + 1);
     let accounts = [s.table, s.game, s.deck, s.hand_creator, s.hand_opponent];
     let rent: u64 = accounts.iter().map(|a| s.svm.get_balance(&addr(*a)).unwrap()).sum();
@@ -1668,4 +1645,151 @@ fn refund_while_delegated_keeps_the_table() {
     assert_eq!(refund(&mut s), None);
     // The game still lives on the rollup, so its Table address stays taken.
     assert_eq!(read_table(&s.svm, s.table).status, TableStatus::Refunded);
+}
+
+// ---- No leaving mid-match ---------------------------------------------------
+
+/// A player who is behind must not be able to undelegate between hands: the
+/// leader would have to re-delegate every time, and once the refund deadline
+/// passes an unfinished game splits the stakes 50/50 whatever the chips say.
+#[test]
+fn trailing_player_cannot_undelegate_to_run_out_the_clock() {
+    let mut s = preflop(); // hand 1, creator is the button and acts first
+    let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    assert!(act(&mut s, &creator, Action::Raise { to: 30 }));
+    assert!(act(&mut s, &opponent, Action::Fold));
+    let g = read_game(&s.svm, Ephemeral, s.game);
+    assert_eq!((g.phase, g.stacks), (Phase::Waiting, [110, 90]));
+
+    // Between hands (Waiting) and before cards (Dealing): both refused.
+    let undelegate = |s: &mut Setup, k: &Keypair| {
+        let ix = undelegate_game_ix(s, k);
+        error_name(&mut s.svm, Ephemeral, k, &[ix])
+    };
+    assert_eq!(undelegate(&mut s, &opponent).as_deref(), Some("MatchNotFinished"));
+    assert!(start_hand(&mut s, &creator));
+    assert_eq!(undelegate(&mut s, &opponent).as_deref(), Some("MatchNotFinished"));
+    assert_eq!(owner(&s.svm, Base, s.game), Pubkey::new_from_array(DELEGATION_PROGRAM_ID.to_bytes()));
+}
+
+// ---- Match clock, shuffle deadline, closing refunded tables ----------------------
+
+use rival_river::constants::START_SECONDS;
+
+fn init_game_err(s: &mut Setup) -> Option<String> {
+    let creator = s.creator.insecure_clone();
+    let ix = ix(
+        instruction::InitGame {},
+        accounts::InitGame {
+            creator: key(&creator),
+            table: s.table,
+            game: s.game,
+            deck: s.deck,
+            hand_creator: s.hand_creator,
+            hand_opponent: s.hand_opponent,
+            system_program: system_program::ID,
+        },
+    );
+    error_name(&mut s.svm, Base, &creator, &[ix])
+}
+
+fn close_refunded(s: &mut Setup) -> Option<String> {
+    let payer = Keypair::new();
+    s.svm.airdrop(&payer.pubkey(), 1_000_000_000).unwrap();
+    let ix = ix(
+        instruction::CloseRefunded {},
+        accounts::CloseRefunded {
+            table: s.table,
+            game: s.game,
+            deck: s.deck,
+            hand_creator: s.hand_creator,
+            hand_opponent: s.hand_opponent,
+            creator: key(&s.creator),
+        },
+    );
+    error_name(&mut s.svm, Base, &payer, &[ix])
+}
+
+#[test]
+fn late_start_is_refused_and_refundable() {
+    let mut s = setup(); // joined, init_game not run
+    advance_clock(&mut s, START_SECONDS + 1);
+    assert_eq!(init_game_err(&mut s).as_deref(), Some("MatchExpired"));
+    assert_eq!(refund(&mut s), None);
+    let tokens = [key(&s.creator), key(&s.opponent)].map(|p| ata(p, s.mint));
+    assert_eq!(tokens.map(|t| balance(&s.svm, t)), [Some(STAKE), Some(STAKE)]);
+}
+
+/// The creator can't start late to squeeze the match against the deadline.
+#[test]
+fn match_clock_starts_at_init_game() {
+    let mut s = setup();
+    advance_clock(&mut s, START_SECONDS - 1); // the creator waits to the last moment
+    let start = now(&s);
+    init_game(&mut s);
+    assert_eq!(read_table(&s.svm, s.table).deadline, start + MATCH_SECONDS);
+    let creator = s.creator.insecure_clone();
+    assert!(delegate_game(&mut s, &creator));
+    assert_eq!(read_game(&s.svm, Ephemeral, s.game).match_deadline, start + MATCH_SECONDS);
+    // Over 2h since join_table, but not since the game started.
+    advance_clock(&mut s, MATCH_SECONDS - 1);
+    assert_eq!(refund(&mut s).as_deref(), Some("RefundTooEarly"));
+}
+
+#[test]
+fn request_shuffle_gives_the_oracle_a_full_turn() {
+    let mut s = private();
+    let creator = s.creator.insecure_clone();
+    both_secrets(&mut s);
+    advance_clock(&mut s, TURN_SECONDS - 1); // request at the last second
+    assert!(request_shuffle(&mut s, &creator));
+    advance_clock(&mut s, 2);
+    assert_eq!(claim_timeout(&mut s, &creator).as_deref(), Some("NotTimedOut"));
+    advance_clock(&mut s, TURN_SECONDS);
+    assert_eq!(claim_timeout(&mut s, &creator), None, "now the stuck request can be cleared");
+    assert!(!read_deck(&s.svm, Ephemeral, s.deck).pending);
+}
+
+#[test]
+fn no_delegating_after_the_deadline() {
+    let mut s = setup();
+    init_game(&mut s);
+    advance_clock(&mut s, MATCH_SECONDS + 1);
+    let creator = s.creator.insecure_clone();
+    let ixs = delegate_game_ixs(&s, &creator);
+    assert_eq!(error_name(&mut s.svm, Base, &creator, &ixs).as_deref(), Some("MatchExpired"));
+}
+
+/// refund leaves a delegated game behind; once it's back, close_refunded
+/// returns all the rent to the creator.
+#[test]
+fn close_refunded_recovers_a_game_left_on_the_rollup() {
+    let mut s = preflop(); // mid-hand, delegated, cards live
+    let opponent = s.opponent.insecure_clone();
+    assert!(!undelegate_game(&mut s, &opponent), "not before the deadline");
+    advance_clock(&mut s, MATCH_SECONDS + 1);
+    assert_eq!(refund(&mut s), None);
+    assert_eq!(read_table(&s.svm, s.table).status, TableStatus::Refunded);
+    assert!(close_refunded(&mut s).is_some(), "game still delegated");
+
+    // Past the deadline anyone at the table can bring it back, unfinished.
+    assert!(undelegate_game(&mut s, &opponent));
+    assert_nothing_secret_on_solana(&s);
+
+    let accounts = [s.table, s.game, s.deck, s.hand_creator, s.hand_opponent];
+    let rent: u64 = accounts.iter().map(|a| s.svm.get_balance(&addr(*a)).unwrap()).sum();
+    let before = s.svm.get_balance(&addr(key(&s.creator))).unwrap();
+    assert_eq!(close_refunded(&mut s), None);
+    for a in accounts {
+        assert!(closed(&s, a), "{a} not closed");
+    }
+    assert_eq!(s.svm.get_balance(&addr(key(&s.creator))).unwrap(), before + rent);
+    assert!(close_refunded(&mut s).is_some(), "only once");
+}
+
+#[test]
+fn close_refunded_needs_a_refunded_table() {
+    let mut s = setup();
+    init_game(&mut s); // InPlay, game on Solana
+    assert_eq!(close_refunded(&mut s).as_deref(), Some("NotRefunded"));
 }

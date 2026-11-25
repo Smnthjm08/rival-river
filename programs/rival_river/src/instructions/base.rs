@@ -1,6 +1,7 @@
 //! Instructions sent to Solana (the base layer): stakes and setup before the
 //! match, handing accounts to the rollup, and paying out after it.
 pub mod cancel_table;
+pub mod close_refunded;
 pub mod create_table;
 pub mod delegate_game;
 pub mod init_game;
@@ -9,6 +10,7 @@ pub mod refund;
 pub mod settle;
 
 pub use cancel_table::*;
+pub use close_refunded::*;
 pub use create_table::*;
 pub use delegate_game::*;
 pub use init_game::*;
