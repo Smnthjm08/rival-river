@@ -1,8 +1,8 @@
 import { Connection } from "@solana/web3.js";
 import { getAuthToken } from "@magicblock-labs/ephemeral-rollups-sdk";
-import { TEE_RPC } from "./config";
+import { TEE_RPC } from "../config";
 import type { WalletSigner } from "./signer";
-import { store } from "./storage";
+import { store } from "../session/storage";
 
 /**
  * A connection to the private rollup that reads as this wallet: Game, and

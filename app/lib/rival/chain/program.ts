@@ -1,8 +1,8 @@
 import { AnchorProvider, Program } from "@anchor-lang/core";
 import { Connection, PublicKey, Transaction } from "@solana/web3.js";
-import idl from "./idl/rival_river.json";
-import type { RivalRiver } from "./idl/rival_river";
-import { BASE_RPC } from "./config";
+import idl from "../idl/rival_river.json";
+import type { RivalRiver } from "../idl/rival_river";
+import { BASE_RPC } from "../config";
 
 // Only used to build instructions and decode accounts, so the provider's
 // wallet never signs anything.

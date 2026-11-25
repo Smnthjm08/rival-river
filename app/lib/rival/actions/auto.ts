@@ -1,6 +1,6 @@
-import { moves, type Seat } from "./actions";
-import type { GameView, HandView } from "./state";
-import { programErrorName } from "./tx";
+import { moves, type Seat } from "./rollup";
+import type { GameView, HandView } from "../game/state";
+import { programErrorName } from "../chain/tx";
 
 /** A move nobody needs to click: the client sends it when it's due. */
 export type AutoStep = "startHand" | "submitSecret" | "requestShuffle" | "claimTimeout";

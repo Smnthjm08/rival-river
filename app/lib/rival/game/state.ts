@@ -1,7 +1,7 @@
 import { Connection, PublicKey } from "@solana/web3.js";
-import { program } from "./program";
+import { program } from "../chain/program";
 import { card, type Card } from "./cards";
-import { matchKeys, type MatchKeys } from "./pdas";
+import { matchKeys, type MatchKeys } from "../chain/pdas";
 
 export type Phase = "waiting" | "dealing" | "preflop" | "flop" | "turn" | "river" | "finished";
 export type TableStatus = "waitingForOpponent" | "locked" | "inPlay" | "settled" | "refunded";

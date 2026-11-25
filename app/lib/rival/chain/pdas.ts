@@ -2,7 +2,7 @@ import { BN } from "@anchor-lang/core";
 import { PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { permissionPdaFromAccount } from "@magicblock-labs/ephemeral-rollups-sdk";
-import { PROGRAM_ID, USDC_MINT } from "./config";
+import { PROGRAM_ID, USDC_MINT } from "../config";
 
 const pda = (...seeds: Buffer[]) => PublicKey.findProgramAddressSync(seeds, PROGRAM_ID)[0];
 
@@ -57,3 +57,6 @@ export const handOf = (k: MatchKeys, seat: 0 | 1) => (seat === 0 ? k.handCreator
 
 /** Signs the program's VRF requests (`#[vrf]`'s program_identity). */
 export const vrfIdentity = PublicKey.findProgramAddressSync([Buffer.from("identity")], PROGRAM_ID)[0];
+
+/** A wallet's USDC account (its associated token account). */
+export const usdcAccount = (owner: PublicKey) => getAssociatedTokenAddressSync(USDC_MINT, owner);
