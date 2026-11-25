@@ -21,3 +21,9 @@ export async function teeConnection(wallet: Pick<WalletSigner, "publicKey" | "si
   url.searchParams.set("token", saved.token);
   return new Connection(url.toString(), "confirmed");
 }
+
+/** True if this tab still holds an unexpired TEE login for the wallet, so teeConnection won't prompt. */
+export function hasTeeLogin(wallet: { toBase58(): string }): boolean {
+  const saved = JSON.parse(store.get(`rr:tee-token:${wallet.toBase58()}`) ?? "null") as { expiresAt: number } | null;
+  return !!saved && saved.expiresAt > Date.now() + 60_000;
+}

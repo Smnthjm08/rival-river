@@ -41,8 +41,9 @@ async function build(plan: TxPlan, feePayer: Keypair | WalletSigner) {
 
 /**
  * Sends and polls until confirmed (no websockets: works the same on Solana
- * and the TEE). Preflight runs, so a refused instruction throws before any
- * fee is spent.
+ * and the TEE). On Solana a refused instruction fails preflight and costs
+ * nothing; on the rollup preflight doesn't simulate, so the failed
+ * transaction still executes and is recorded (gasless, but not free of noise).
  */
 async function submit(conn: Connection, tx: Transaction): Promise<string> {
   let sig: string;
@@ -68,8 +69,9 @@ async function submit(conn: Connection, tx: Transaction): Promise<string> {
 
 /** One transaction, paid and signed by a keypair (session key) or wallet. */
 export async function sendTx(plan: TxPlan, feePayer: Keypair | WalletSigner): Promise<string> {
-  const tx = await build(plan, feePayer);
-  if (!(feePayer instanceof Keypair)) await feePayer.signTransaction(tx);
+  let tx = await build(plan, feePayer);
+  // Browser wallets return a signed copy rather than signing in place.
+  if (!(feePayer instanceof Keypair)) tx = await feePayer.signTransaction(tx);
   return submit(plan.conn, tx);
 }
 
@@ -78,8 +80,8 @@ export async function sendTx(plan: TxPlan, feePayer: Keypair | WalletSigner): Pr
  * (signAllTransactions). Each waits for the previous one to confirm.
  */
 export async function sendTxs(plans: TxPlan[], wallet: WalletSigner): Promise<string[]> {
-  const txs = await Promise.all(plans.map((p) => build(p, wallet)));
-  await wallet.signAllTransactions(txs);
+  const unsigned = await Promise.all(plans.map((p) => build(p, wallet)));
+  const txs = await wallet.signAllTransactions(unsigned);
   const sigs: string[] = [];
   for (const [i, tx] of txs.entries()) sigs.push(await submit(plans[i].conn, tx));
   return sigs;
