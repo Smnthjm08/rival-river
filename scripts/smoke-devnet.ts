@@ -262,7 +262,16 @@ async function main() {
   check("rollup copy owned by the program", true, "getAccountInfo(game) on the TEE");
 
   log("\n[3] permissions + (d) no undelegating mid-match");
-  sig("init_permissions", "rollup", await send(teeC, [await initPermissionsIx(creator.publicKey)], [creator]));
+  // Session keys: fresh and unfunded, as a browser tab would make them. Each
+  // wallet signs once to register its key (the creator's rides along with
+  // init_permissions); from here the keys sign every move of the match.
+  const sessions = [Keypair.generate(), Keypair.generate()];
+  report.keys.sessions = sessions.map((k) => k.publicKey.toBase58());
+  const setSessionIx = (wallet: PublicKey, session: Keypair) =>
+    program.methods.setSessionKey(session.publicKey).accountsPartial({ player: wallet, game }).instruction();
+  sig("init_permissions + set_session_key (creator)", "rollup",
+    await send(teeC, [await initPermissionsIx(creator.publicKey), await setSessionIx(creator.publicKey, sessions[0])], [creator]));
+  sig("set_session_key (opponent)", "rollup", await send(teeO, [await setSessionIx(opponent.publicKey, sessions[1])], [opponent]));
   // A trailing player could otherwise undelegate between hands until the
   // refund deadline splits the stakes 50/50.
   const early = await send(teeC, [await undelegateIx(opponent.publicKey)], [opponent]).then(
@@ -290,11 +299,12 @@ async function main() {
   check("Deck readable by nobody", !reads.creatorReadsDeck && !reads.opponentReadsDeck, `c ${reads.creatorReadsDeck}, o ${reads.opponentReadsDeck}`);
 
   log("\n[5] hands (rollup, real VRF)");
-  const players = [creator, opponent];
+  // Every move below is signed (and fee-paid) by an unfunded session key.
+  const players = sessions;
   const teeOf = [teeC, teeO];
   let firstSecretSig = "";
   for (let hand = 1; hand <= 10; hand++) {
-    sig(`hand ${hand}: start_hand`, "rollup", await send(teeC, [await program.methods.startHand().accountsPartial({ player: creator.publicKey, game }).instruction()], [creator]));
+    sig(`hand ${hand}: start_hand`, "rollup", await send(teeC, [await program.methods.startHand().accountsPartial({ player: sessions[0].publicKey, game }).instruction()], [sessions[0]]));
     for (const [i, p] of players.entries()) {
       const secret = Array.from(crypto.getRandomValues(new Uint8Array(32)));
       const s = await send(teeOf[i], [
@@ -318,9 +328,9 @@ async function main() {
 
     const shuffle = await program.methods
       .requestShuffle()
-      .accountsPartial({ player: creator.publicKey, ...matchAccounts, programIdentity: pda(Buffer.from("identity")) })
+      .accountsPartial({ player: sessions[0].publicKey, ...matchAccounts, programIdentity: pda(Buffer.from("identity")) })
       .instruction();
-    sig(`hand ${hand}: request_shuffle`, "rollup", await send(teeC, [shuffle], [creator]));
+    sig(`hand ${hand}: request_shuffle`, "rollup", await send(teeC, [shuffle], [sessions[0]]));
     if (hand === 1) check("(c) TEE accepts a tx listing the opponent's Hand and the Deck", true, "request_shuffle confirmed");
     const t0 = Date.now();
     await waitFor("the VRF answer (phase Preflop)", async () => "preflop" in (await readGame(teeC)).phase, 120);

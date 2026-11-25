@@ -45,6 +45,11 @@ pub struct Game {
     /// the rollup can check who's playing without reading the Table on Solana.
     /// Every [_; 2] below uses the same order.
     pub players: [Pubkey; 2],
+    /// Each player's session key (Pubkey::default() = none), set by
+    /// set_session_key. It can sign everything that plays the match on the
+    /// rollup, so the wallet isn't asked to sign every action. It can't
+    /// touch the stakes: everything on Solana still needs the wallet.
+    pub session_keys: [Pubkey; 2],
     /// 0 before the first hand, 1..=6 during the match, 7+ for sudden death.
     pub hand_number: u8,
     /// Set by init_permissions. Until then every account on the private
@@ -87,6 +92,16 @@ pub struct Game {
     /// Index of the match winner, once there is one.
     pub winner: Option<u8>,
     pub bump: u8,
+}
+
+impl Game {
+    /// The seat (index into `players`) that `key` plays for: a player's
+    /// wallet or their session key.
+    pub fn seat_of(&self, key: &Pubkey) -> Option<usize> {
+        (0..2).find(|&i| self.players[i] == *key).or_else(|| {
+            (0..2).find(|&i| self.session_keys[i] == *key && *key != Pubkey::default())
+        })
+    }
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug, InitSpace)]

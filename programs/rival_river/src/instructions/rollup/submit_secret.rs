@@ -9,7 +9,7 @@ use crate::state::{Game, Hand};
 /// so neither the oracle nor either player alone can work out the deck.
 #[derive(Accounts)]
 pub struct SubmitSecret<'info> {
-    #[account(constraint = game.players.contains(&player.key()) @ ErrorCode::NotAPlayer)]
+    /// The player's wallet or session key.
     pub player: Signer<'info>,
 
     /// `permissions_ready`: a secret written before init_permissions would sit
@@ -19,9 +19,12 @@ pub struct SubmitSecret<'info> {
               constraint = game.permissions_ready @ ErrorCode::PermissionsMissing)]
     pub game: Account<'info, Game>,
 
-    /// Seeds include the signer's key, so a player can only write their own Hand.
-    #[account(mut, seeds = [HAND_SEED, game.key().as_ref(), player.key().as_ref()],
-              bump = hand.bump)]
+    /// Only the signer's own Hand: the seeds pin it to this game, and the
+    /// constraint to the seat the signer plays for.
+    #[account(mut, seeds = [HAND_SEED, game.key().as_ref(), hand.player.as_ref()],
+              bump = hand.bump,
+              constraint = game.seat_of(&player.key()).map(|s| game.players[s]) == Some(hand.player)
+                  @ ErrorCode::NotAPlayer)]
     pub hand: Account<'info, Hand>,
 }
 

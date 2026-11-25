@@ -84,6 +84,11 @@ pub mod rival_river {
         undelegate_game::undelegate_game_handler(ctx)
     }
 
+    /// Signed by the player's wallet; the key can then sign the match's moves.
+    pub fn set_session_key(ctx: Context<SetSessionKey>, key: Pubkey) -> Result<()> {
+        set_session_key::set_session_key_handler(ctx, key)
+    }
+
     pub fn submit_secret(ctx: Context<SubmitSecret>, secret: [u8; 32]) -> Result<()> {
         submit_secret::submit_secret_handler(ctx, secret)
     }

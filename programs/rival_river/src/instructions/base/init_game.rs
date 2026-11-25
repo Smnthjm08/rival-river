@@ -76,6 +76,7 @@ pub fn init_game_handler(ctx: Context<InitGame>) -> Result<()> {
     ctx.accounts.game.set_inner(Game {
         table: table.key(),
         players: [table.creator, table.opponent],
+        session_keys: [Pubkey::default(); 2],
         hand_number: 0,
         permissions_ready: false,
         stacks: [STARTING_STACK; 2],

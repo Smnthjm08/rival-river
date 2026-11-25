@@ -30,7 +30,8 @@ pub struct Act<'info> {
         mut, seeds = [GAME_SEED, game.table.as_ref()], bump = game.bump,
         constraint = matches!(game.phase, Phase::Preflop | Phase::Flop | Phase::Turn | Phase::River)
             @ ErrorCode::NotBetting,
-        constraint = game.players[game.to_act as usize] == player.key() @ ErrorCode::NotYourTurn,
+        // Wallet or session key of the player whose turn it is.
+        constraint = game.seat_of(&player.key()) == Some(game.to_act as usize) @ ErrorCode::NotYourTurn,
     )]
     pub game: Account<'info, Game>,
 

@@ -1793,3 +1793,99 @@ fn close_refunded_needs_a_refunded_table() {
     init_game(&mut s); // InPlay, game on Solana
     assert_eq!(close_refunded(&mut s).as_deref(), Some("NotRefunded"));
 }
+
+// ---- Session keys ------------------------------------------------------------
+
+fn set_session_key(s: &mut Setup, signer: &Keypair, session: Pubkey) -> Option<String> {
+    let ix = ix(
+        instruction::SetSessionKey { key: session },
+        accounts::SetSessionKey { player: key(signer), game: s.game },
+    );
+    error_name(&mut s.svm, Ephemeral, signer, &[ix])
+}
+
+/// private() + a fresh, unfunded session key for each player, registered by
+/// their wallet. Returns [creator's, opponent's].
+fn with_sessions() -> (Setup, [Keypair; 2]) {
+    let mut s = private();
+    let sessions = [Keypair::new(), Keypair::new()];
+    let wallets = [s.creator.insecure_clone(), s.opponent.insecure_clone()];
+    for (wallet, session) in wallets.iter().zip(&sessions) {
+        assert_eq!(set_session_key(&mut s, wallet, key(session)), None);
+    }
+    (s, sessions)
+}
+
+#[test]
+fn session_keys_play_a_whole_hand() {
+    let (mut s, [c, o]) = with_sessions();
+    let (hc, ho) = (s.hand_creator, s.hand_opponent);
+    let g = read_game(&s.svm, Ephemeral, s.game);
+    assert_eq!(g.session_keys, [key(&c), key(&o)]);
+
+    assert!(submit_secret_to(&mut s, &c, hc, [0xC1; 32]));
+    assert!(submit_secret_to(&mut s, &o, ho, [0x0B; 32]));
+    assert!(request_shuffle(&mut s, &c), "unfunded session key can request the VRF");
+    assert_eq!(fulfill(&mut s.svm), 1);
+    assert!(act(&mut s, &c, Action::Call));
+    assert!(act(&mut s, &o, Action::Raise { to: 30 }));
+    assert!(act(&mut s, &c, Action::Fold)); // creator put in 10
+    assert_eq!(read_game(&s.svm, Ephemeral, s.game).stacks, [90, 110]);
+
+    // Next hand, and a timeout claim, from session keys too.
+    assert!(start_hand(&mut s, &o));
+    advance_clock(&mut s, TURN_SECONDS + 1);
+    assert!(submit_secret_to(&mut s, &c, hc, [0xC2; 32]));
+    assert_eq!(claim_timeout(&mut s, &c), None, "opponent never sent a secret");
+    assert_eq!(read_game(&s.svm, Ephemeral, s.game).phase, Phase::Waiting);
+}
+
+#[test]
+fn session_key_plays_only_its_own_seat() {
+    let (mut s, [c, o]) = with_sessions();
+    let (hc, ho) = (s.hand_creator, s.hand_opponent);
+    assert!(!submit_secret_to(&mut s, &o, hc, [1; 32]), "opponent's key can't write the creator's Hand");
+    assert!(!submit_secret_to(&mut s, &c, ho, [1; 32]));
+    both_secrets(&mut s);
+    let creator = s.creator.insecure_clone();
+    assert!(request_shuffle(&mut s, &creator));
+    fulfill(&mut s.svm);
+    assert!(!act(&mut s, &o, Action::Call), "creator (button) acts first");
+    assert!(act(&mut s, &c, Action::Call));
+}
+
+#[test]
+fn only_a_wallet_can_set_a_session_key() {
+    let (mut s, [c, _]) = with_sessions();
+    let stranger = Keypair::new();
+    s.svm.airdrop(&stranger.pubkey(), 1_000_000_000).unwrap();
+    assert_eq!(set_session_key(&mut s, &c, key(&stranger)).as_deref(), Some("NotAPlayer"));
+    assert_eq!(set_session_key(&mut s, &stranger, key(&stranger)).as_deref(), Some("NotAPlayer"));
+}
+
+#[test]
+fn session_key_cannot_be_the_other_players_key() {
+    let (mut s, [c, _]) = with_sessions();
+    let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    assert_eq!(set_session_key(&mut s, &opponent, key(&c)).as_deref(), Some("SessionKeyTaken"));
+    assert_eq!(set_session_key(&mut s, &opponent, key(&creator)).as_deref(), Some("SessionKeyTaken"));
+    assert_eq!(set_session_key(&mut s, &creator, key(&c)), None, "re-setting your own is a no-op");
+}
+
+#[test]
+fn replacing_a_session_key_retires_the_old_one() {
+    let (mut s, [old, o]) = with_sessions();
+    let creator = s.creator.insecure_clone();
+    let hc = s.hand_creator;
+    let new = Keypair::new();
+    assert_eq!(set_session_key(&mut s, &creator, key(&new)), None);
+    assert!(!submit_secret_to(&mut s, &old, hc, [1; 32]), "lost tab's key no longer plays");
+    assert!(submit_secret_to(&mut s, &new, hc, [1; 32]));
+
+    // Removing it leaves only the wallet.
+    assert_eq!(set_session_key(&mut s, &creator, Pubkey::default()), None);
+    let ho = s.hand_opponent;
+    assert!(submit_secret_to(&mut s, &o, ho, [2; 32]));
+    assert!(!request_shuffle(&mut s, &new));
+    assert!(request_shuffle(&mut s, &creator));
+}

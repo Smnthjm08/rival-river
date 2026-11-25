@@ -4,10 +4,11 @@ use crate::constants::{BLINDS, GAME_SEED, MAX_HANDS, TURN_SECONDS};
 use crate::error::ErrorCode;
 use crate::state::{Game, Phase};
 
-/// Runs on the rollup, between hands. Either player can start the next hand.
+/// Runs on the rollup, between hands. Either player (wallet or session key)
+/// can start the next hand.
 #[derive(Accounts)]
 pub struct StartHand<'info> {
-    #[account(constraint = game.players.contains(&player.key()) @ ErrorCode::NotAPlayer)]
+    #[account(constraint = game.seat_of(&player.key()).is_some() @ ErrorCode::NotAPlayer)]
     pub player: Signer<'info>,
 
     #[account(mut, seeds = [GAME_SEED, game.table.as_ref()], bump = game.bump,

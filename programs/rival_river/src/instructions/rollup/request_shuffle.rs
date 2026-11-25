@@ -16,7 +16,7 @@ use crate::state::{Deck, Game, Hand, Phase};
 #[vrf]
 #[derive(Accounts)]
 pub struct RequestShuffle<'info> {
-    #[account(mut, constraint = game.players.contains(&player.key()) @ ErrorCode::NotAPlayer)]
+    #[account(mut, constraint = game.seat_of(&player.key()).is_some() @ ErrorCode::NotAPlayer)]
     pub player: Signer<'info>,
 
     /// Only once start_hand has posted the blinds, and only once per hand:

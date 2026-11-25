@@ -66,4 +66,6 @@ pub enum ErrorCode {
     MatchExpired,
     #[msg("Only a refunded table can be closed this way")]
     NotRefunded,
+    #[msg("That key already plays in this game")]
+    SessionKeyTaken,
 }

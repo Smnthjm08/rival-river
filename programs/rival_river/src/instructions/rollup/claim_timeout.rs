@@ -9,7 +9,7 @@ use crate::state::{Deck, Game, Hand, Phase};
 /// passed, so a stalling player can't hold the match hostage.
 #[derive(Accounts)]
 pub struct ClaimTimeout<'info> {
-    #[account(constraint = game.players.contains(&player.key()) @ ErrorCode::NotAPlayer)]
+    #[account(constraint = game.seat_of(&player.key()).is_some() @ ErrorCode::NotAPlayer)]
     pub player: Signer<'info>,
 
     #[account(
