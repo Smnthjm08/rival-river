@@ -139,11 +139,15 @@ async function routerStatus(account: PublicKey) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getDelegationStatus", params: [account.toBase58()] }),
   });
-  return (await r.json()).result as { isDelegated: boolean; fqdn?: string; delegationRecord?: { authority: string } };
+  const body = (await r.json()) as {
+    result: { isDelegated: boolean; fqdn?: string; delegationRecord?: { authority: string } };
+  };
+  return body.result;
 }
 
+// Program camelCases the IDL: account names are "game", "deck", ... too.
 const decode = (name: "game" | "deck" | "hand" | "table", data: Buffer) =>
-  program.coder.accounts.decode(name.charAt(0).toUpperCase() + name.slice(1), data);
+  program.coder.accounts.decode(name, data);
 const readGame = async (conn: Connection) => decode("game", (await conn.getAccountInfo(game))!.data);
 
 // ---- instructions -----------------------------------------------------------
@@ -265,7 +269,7 @@ async function main() {
     (s) => `went through: ${s}`,
     (e) => String(e),
   );
-  check("(d) undelegate refused before the match is finished", early.includes("MatchNotFinished"), early.slice(0, 160));
+  check("(d) undelegate refused before the match is finished", /MatchNotFinished|0x1784/.test(early), early.slice(0, 160));
 
   log("\n[4] (b) who can read what");
   const can = async (conn: Connection, acc: PublicKey) => (await conn.getAccountInfo(acc).catch(() => null)) !== null;
@@ -300,8 +304,13 @@ async function main() {
       if (!firstSecretSig) firstSecretSig = s;
     }
     if (hand === 1) {
-      const seen = async (conn: Connection) =>
-        (await conn.getTransaction(firstSecretSig, { maxSupportedTransactionVersion: 1, commitment: "confirmed" }).catch(() => null)) !== null;
+      // The TEE answers with a redacted stub (signature only, no accounts,
+      // instructions or logs) — even to the sender — so "seen" means the
+      // message itself came back.
+      const seen = async (conn: Connection) => {
+        const t = await conn.getTransaction(firstSecretSig, { maxSupportedTransactionVersion: 1, commitment: "confirmed" }).catch(() => null);
+        return (t?.transaction.message.staticAccountKeys.length ?? 0) > 0;
+      };
       const [own, other, pub] = [await seen(teeC), await seen(teeO), await seen(teePublic)];
       report.secretTxVisibility = { creatorSeesOwn: own, opponentSeesIt: other, publicSeesIt: pub };
       check("(b) opponent can't fetch the creator's submit_secret tx", !other && !pub, `creator ${own}, opponent ${other}, public ${pub}`);
