@@ -3,8 +3,20 @@ import { program } from "../chain/program";
 import { card, type Card } from "./cards";
 import { matchKeys, type MatchKeys } from "../chain/pdas";
 
-export type Phase = "waiting" | "dealing" | "preflop" | "flop" | "turn" | "river" | "finished";
-export type TableStatus = "waitingForOpponent" | "locked" | "inPlay" | "settled" | "refunded";
+export type Phase =
+  | "waiting"
+  | "dealing"
+  | "preflop"
+  | "flop"
+  | "turn"
+  | "river"
+  | "finished";
+export type TableStatus =
+  | "waitingForOpponent"
+  | "locked"
+  | "inPlay"
+  | "settled"
+  | "refunded";
 type Pair<T> = [T, T];
 
 export interface TableView {
@@ -49,13 +61,28 @@ export interface HandView {
 }
 
 const variant = <T extends string>(e: object) => Object.keys(e)[0] as T;
-const orNone = (ks: PublicKey[]) => ks.map((k) => (k.equals(PublicKey.default) ? null : k)) as Pair<PublicKey | null>;
-const num = (n: { toNumber(): number } | number) => (typeof n === "number" ? n : n.toNumber());
+const orNone = (ks: PublicKey[]) =>
+  ks.map((k) =>
+    k.equals(PublicKey.default) ? null : k
+  ) as Pair<PublicKey | null>;
+const num = (n: { toNumber(): number } | number) =>
+  typeof n === "number" ? n : n.toNumber();
 
 /** How many board cards are face up. Waiting after a showdown keeps all five. */
-const BOARD_SHOWN: Record<Phase, number> = { waiting: 0, dealing: 0, preflop: 0, flop: 3, turn: 4, river: 5, finished: 0 };
+const BOARD_SHOWN: Record<Phase, number> = {
+  waiting: 0,
+  dealing: 0,
+  preflop: 0,
+  flop: 3,
+  turn: 4,
+  river: 5,
+  finished: 0,
+};
 
-export async function fetchTable(base: Connection, table: PublicKey): Promise<TableView | null> {
+export async function fetchTable(
+  base: Connection,
+  table: PublicKey
+): Promise<TableView | null> {
   const info = await base.getAccountInfo(table);
   if (!info) return null;
   const t = program.coder.accounts.decode("table", info.data);
@@ -69,12 +96,17 @@ export async function fetchTable(base: Connection, table: PublicKey): Promise<Ta
 }
 
 /** Reads Game from wherever it lives now: the TEE while delegated, else Solana. */
-export async function fetchGame(conn: Connection, game: PublicKey): Promise<GameView | null> {
+export async function fetchGame(
+  conn: Connection,
+  game: PublicKey
+): Promise<GameView | null> {
   const info = await conn.getAccountInfo(game);
   if (!info || !info.owner.equals(program.programId)) return null;
   const g = program.coder.accounts.decode("game", info.data);
   const phase = variant<Phase>(g.phase);
-  const shown = g.shown ? (g.shown as number[][]).map((h) => h.map(card)) as Pair<Pair<Card>> : null;
+  const shown = g.shown
+    ? ((g.shown as number[][]).map((h) => h.map(card)) as Pair<Pair<Card>>)
+    : null;
   const faceUp = shown ? 5 : BOARD_SHOWN[phase];
   return {
     handNumber: g.handNumber,
@@ -102,11 +134,17 @@ export async function fetchGame(conn: Connection, game: PublicKey): Promise<Game
  * the account isn't there; network and login errors (see isTeeAuthError)
  * throw, so a failed read never looks like "no cards".
  */
-export async function fetchHand(tee: Connection, hand: PublicKey): Promise<HandView | null> {
+export async function fetchHand(
+  tee: Connection,
+  hand: PublicKey
+): Promise<HandView | null> {
   const info = await tee.getAccountInfo(hand);
   if (!info) return null;
   const h = program.coder.accounts.decode("hand", info.data);
-  return { cards: h.dealt ? ((h.cards as number[]).map(card) as Pair<Card>) : null, hasSecret: h.hasSecret };
+  return {
+    cards: h.dealt ? ((h.cards as number[]).map(card) as Pair<Card>) : null,
+    hasSecret: h.hasSecret,
+  };
 }
 
 /**
@@ -114,7 +152,11 @@ export async function fetchHand(tee: Connection, hand: PublicKey): Promise<HandV
  * cards until the next deal, so they're hidden while the next hand waits
  * for its shuffle.
  */
-export async function fetchMatch(tee: Connection, keys: MatchKeys, seat: 0 | 1) {
+export async function fetchMatch(
+  tee: Connection,
+  keys: MatchKeys,
+  seat: 0 | 1
+) {
   const [game, hand] = await Promise.all([
     fetchGame(tee, keys.game),
     fetchHand(tee, seat === 0 ? keys.handCreator : keys.handOpponent),

@@ -4,7 +4,11 @@ import type { GameView, HandView } from "../game/state";
 import { programErrorName } from "../chain/tx";
 
 /** A move nobody needs to click: the client sends it when it's due. */
-export type AutoStep = "startHand" | "submitSecret" | "requestShuffle" | "claimTimeout";
+export type AutoStep =
+  | "startHand"
+  | "submitSecret"
+  | "requestShuffle"
+  | "claimTimeout";
 
 /**
  * What this seat should send now, given the latest snapshot. Both players'
@@ -12,7 +16,12 @@ export type AutoStep = "startHand" | "submitSecret" | "requestShuffle" | "claimT
  * Starts the next hand at once: a live table should use HandTracker.
  * Fold/check/call/raise are never automatic, except through claim_timeout.
  */
-export function dueSteps(game: GameView, hand: HandView | null, seat: 0 | 1, now = Date.now() / 1000): AutoStep[] {
+export function dueSteps(
+  game: GameView,
+  hand: HandView | null,
+  seat: 0 | 1,
+  now = Date.now() / 1000
+): AutoStep[] {
   if (!game.permissionsReady || game.phase === "finished") return [];
   const late = now > game.deadline;
   switch (game.phase) {
@@ -56,15 +65,27 @@ export class HandTracker {
   constructor(readonly seat: 0 | 1, readonly pauseSeconds = 4) {}
 
   /** Call with every new snapshot. Returns the steps to send now. */
-  due(game: GameView, hand: HandView | null, now = Date.now() / 1000): AutoStep[] {
+  due(
+    game: GameView,
+    hand: HandView | null,
+    now = Date.now() / 1000
+  ): AutoStep[] {
     const between = game.phase === "waiting" || game.phase === "finished";
     if (!between) {
       // Heads-up, both players put the same into the pot, so a player's
       // stack at the start of the hand is what they hold + bet + half the pot.
-      const start = game.stacks.map((s, i) => s + game.bets[i] + game.pot / 2) as Pair<number>;
+      const start = game.stacks.map(
+        (s, i) => s + game.bets[i] + game.pot / 2
+      ) as Pair<number>;
       this.handStart = { handNumber: game.handNumber, stacks: start };
-    } else if (game.handNumber > 0 && this.lastResult?.handNumber !== game.handNumber) {
-      const start = this.handStart?.handNumber === game.handNumber ? this.handStart.stacks : null;
+    } else if (
+      game.handNumber > 0 &&
+      this.lastResult?.handNumber !== game.handNumber
+    ) {
+      const start =
+        this.handStart?.handNumber === game.handNumber
+          ? this.handStart.stacks
+          : null;
       this.lastResult = {
         handNumber: game.handNumber,
         board: game.board,
@@ -74,7 +95,8 @@ export class HandTracker {
       };
       this.endedAt = now;
     }
-    if (game.phase === "waiting" && now - this.endedAt < this.pauseSeconds) return [];
+    if (game.phase === "waiting" && now - this.endedAt < this.pauseSeconds)
+      return [];
     return dueSteps(game, hand, this.seat, now);
   }
 }

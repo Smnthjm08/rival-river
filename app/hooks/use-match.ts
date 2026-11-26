@@ -1,7 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchMatch, HandTracker, isTeeAuthError, moves, runSteps, type Action, type GameView, type HandResult, type HandView, type Seat } from "@/lib/rival";
+import {
+  fetchMatch,
+  HandTracker,
+  isTeeAuthError,
+  moves,
+  runSteps,
+  type Action,
+  type GameView,
+  type HandResult,
+  type HandView,
+  type Seat,
+} from "@/lib/rival";
 
 export interface MatchState {
   game: GameView | null;
@@ -20,8 +31,17 @@ const resultsKey = (s: Seat) => `rr:results:${s.keys.game.toBase58()}`;
  * session key, and exposes `act` for fold / check / call / raise. If the TEE
  * refuses the login token, polling stops and `onAuthLost` is called.
  */
-export function useMatch(seat: Seat | null, onAuthLost?: () => void, everyMs = 800) {
-  const [state, setState] = useState<MatchState>({ game: null, hand: null, lastResult: null, results: [] });
+export function useMatch(
+  seat: Seat | null,
+  onAuthLost?: () => void,
+  everyMs = 800
+) {
+  const [state, setState] = useState<MatchState>({
+    game: null,
+    hand: null,
+    lastResult: null,
+    results: [],
+  });
   const [acting, setActing] = useState(false);
   const tracker = useRef<HandTracker | null>(null);
   const running = useRef(false);
@@ -33,7 +53,9 @@ export function useMatch(seat: Seat | null, onAuthLost?: () => void, everyMs = 8
   useEffect(() => {
     if (!seat) return;
     tracker.current = new HandTracker(seat.seat);
-    const saved = JSON.parse(sessionStorage.getItem(resultsKey(seat)) ?? "[]") as HandResult[];
+    const saved = JSON.parse(
+      sessionStorage.getItem(resultsKey(seat)) ?? "[]"
+    ) as HandResult[];
     // eslint-disable-next-line react-hooks/set-state-in-effect -- restoring this tab's hand history once per seat
     setState((s) => ({ ...s, results: saved }));
 
@@ -46,8 +68,12 @@ export function useMatch(seat: Seat | null, onAuthLost?: () => void, everyMs = 8
           const due = tracker.current!.due(game, hand);
           const r = tracker.current!.lastResult;
           setState((s) => {
-            const results = r && !s.results.some((x) => x.handNumber === r.handNumber) ? [...s.results, r] : s.results;
-            if (results !== s.results) sessionStorage.setItem(resultsKey(seat), JSON.stringify(results));
+            const results =
+              r && !s.results.some((x) => x.handNumber === r.handNumber)
+                ? [...s.results, r]
+                : s.results;
+            if (results !== s.results)
+              sessionStorage.setItem(resultsKey(seat), JSON.stringify(results));
             return { game, hand, lastResult: r, results };
           });
           // One batch of automatic steps at a time; the next snapshot decides again.
@@ -85,7 +111,7 @@ export function useMatch(seat: Seat | null, onAuthLost?: () => void, everyMs = 8
         setActing(false);
       }
     },
-    [seat],
+    [seat]
   );
 
   return { ...state, act, acting };

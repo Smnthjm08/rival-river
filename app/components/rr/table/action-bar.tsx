@@ -78,7 +78,7 @@ export function ActionBar({ game, me, opponentName, acting, onAct }: ActionBarPr
         <TurnTimer secondsLeft={secondsLeft} total={TURN_SECONDS} />
         <div className="flex flex-col">
           <span className="text-[15px] font-semibold text-brass">Your turn</span>
-          <span className="text-[13px] text-muted-foreground">{secondsLeft} s left</span>
+          <span className="text-[13px] text-muted-foreground">{secondsLeft} s left · amounts in chips</span>
         </div>
       </div>
 

@@ -25,8 +25,11 @@ export function friendlyError(e: unknown): string {
   const name = programErrorName(e);
   if (name && COPY[name]) return COPY[name];
   const text = String((e as { message?: string })?.message ?? e);
-  if (/user rejected|rejected the request|cancel/i.test(text)) return "You cancelled in your wallet.";
-  if (/insufficient (funds|lamports)|custom program error: 0x1\b/i.test(text)) return "Not enough USDC, or SOL for fees.";
-  if (/timed out/i.test(text)) return "The network is slow. Try again in a moment.";
+  if (/user rejected|rejected the request|cancel/i.test(text))
+    return "You cancelled in your wallet.";
+  if (/insufficient (funds|lamports)|custom program error: 0x1\b/i.test(text))
+    return "Not enough USDC, or SOL for fees.";
+  if (/timed out/i.test(text))
+    return "The network is slow. Try again in a moment.";
   return "Something went wrong. Try again.";
 }

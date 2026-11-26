@@ -2,7 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { PublicKey } from "@solana/web3.js";
-import { base, fetchGame, fetchTable, isOnRollup, type GameView, type TableView } from "@/lib/rival";
+import {
+  base,
+  fetchGame,
+  fetchTable,
+  isOnRollup,
+  type GameView,
+  type TableView,
+} from "@/lib/rival";
 
 export interface TableState {
   /** undefined while loading; null once we know the table is closed (settled, cancelled or refunded and closed). */
@@ -15,7 +22,11 @@ export interface TableState {
 
 /** Polls a table on Solana. Cheap enough at one read every few seconds. */
 export function useTable(tablePda: PublicKey | null, everyMs = 3000) {
-  const [state, setState] = useState<TableState>({ table: undefined, gameOnSolana: null, onRollup: false });
+  const [state, setState] = useState<TableState>({
+    table: undefined,
+    gameOnSolana: null,
+    onRollup: false,
+  });
 
   const refresh = useCallback(async () => {
     if (!tablePda) return;
@@ -25,8 +36,12 @@ export function useTable(tablePda: PublicKey | null, everyMs = 3000) {
       setState({ table, gameOnSolana: null, onRollup: false });
       return;
     }
-    const gameOnSolana = await fetchGame(base, table.keys.game).catch(() => null);
-    const onRollup = gameOnSolana ? false : await isOnRollup(table.keys).catch(() => false);
+    const gameOnSolana = await fetchGame(base, table.keys.game).catch(
+      () => null
+    );
+    const onRollup = gameOnSolana
+      ? false
+      : await isOnRollup(table.keys).catch(() => false);
     setState({ table, gameOnSolana, onRollup });
   }, [tablePda]);
 

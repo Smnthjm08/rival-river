@@ -235,7 +235,12 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
             description={
               <>
                 <span className="font-mono font-semibold text-brass">{formatUsdc(final.amount)} USDC</span>
-                {final.iWon === false ? " went to your opponent." : final.iWon ? " is in your wallet." : " went to the winner."} The table is closed.
+                {final.iWon === false
+                  ? " went to your opponent."
+                  : final.iWon
+                    ? ` is in your wallet: your stake back plus ${formatUsdc(final.amount / 2)} USDC from your opponent.`
+                    : " went to the winner."}{" "}
+                The table is closed.
               </>
             }
           >
@@ -338,7 +343,9 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
           description={
             <>
               <span className="font-mono font-semibold text-brass">{formatUsdc(table.stake * 2)} USDC</span> is waiting in escrow for the winner.{" "}
-              {iWon ? "One approval in your wallet pays it out." : "Either player can send the payout."}
+              {iWon
+                ? `That’s your ${formatUsdc(table.stake)} USDC stake back plus your opponent’s ${formatUsdc(table.stake)}. One approval in your wallet pays it out.`
+                : "Either player can send the payout."}
             </>
           }
         >

@@ -3,7 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Eyebrow } from "@/components/rr/table-pieces";
 import { PlayingCard } from "@/components/rr/playing-card";
 import { formatUsdc } from "@/hooks/use-usdc-balance";
-import { MAX_HANDS, type GameView, type HandResult, type MatchKeys } from "@/lib/rival";
+import { STARTING_STACK, MAX_HANDS, type GameView, type HandResult, type MatchKeys } from "@/lib/rival";
 import { cn } from "@/lib/utils";
 
 export const explorer = (kind: "address" | "tx", id: string) => `https://explorer.solana.com/${kind}/${id}?cluster=devnet`;
@@ -31,7 +31,8 @@ export function MatchSidebar({ game, me, names, stake, keys, results, lastResult
           <Eyebrow>Winner takes</Eyebrow>
           <span className="font-mono text-[34px] font-semibold text-brass">{formatUsdc(stake * 2)} USDC</span>
           <span className="text-sm/relaxed text-muted-foreground">
-            {formatUsdc(stake)} USDC each, held in escrow on Solana. Paid out when the match ends.
+            {formatUsdc(stake)} USDC each, held in escrow on Solana. Bets are in chips, not USDC: win all{" "}
+            {STARTING_STACK * 2} chips, or lead after {MAX_HANDS} hands, and you take the whole {formatUsdc(stake * 2)} USDC.
           </span>
           <a href={explorer("address", keys.vault.toBase58())} target="_blank" rel="noreferrer" className="mt-1 flex items-center gap-1.5 text-sm text-brass underline-offset-4 hover:underline">
             View escrow account

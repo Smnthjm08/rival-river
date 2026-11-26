@@ -12,7 +12,8 @@ import type { WalletSigner } from "@/lib/rival";
  * transaction.
  */
 export function useWalletSigner(): WalletSigner | null {
-  const { publicKey, signTransaction, signAllTransactions, signMessage } = useWallet();
+  const { publicKey, signTransaction, signAllTransactions, signMessage } =
+    useWallet();
   return useMemo(() => {
     if (!publicKey || !signTransaction || !signMessage) return null;
     return {

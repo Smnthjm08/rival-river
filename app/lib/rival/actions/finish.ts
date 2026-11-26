@@ -2,10 +2,18 @@
 //! Both players' tabs may run this at the same time; whichever lands second
 //! finds the work done and returns quietly.
 import type { Keypair } from "@solana/web3.js";
-import { createAssociatedTokenAccountIdempotentInstruction, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import {
+  createAssociatedTokenAccountIdempotentInstruction,
+  TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
 import { PROGRAM_ID, USDC_MINT } from "../config";
 import { base, waitFor } from "../chain/connection";
-import { permissionAccounts, rollupAccounts, usdcAccount as usdcOf, type MatchKeys } from "../chain/pdas";
+import {
+  permissionAccounts,
+  rollupAccounts,
+  usdcAccount as usdcOf,
+  type MatchKeys,
+} from "../chain/pdas";
 import { program } from "../chain/program";
 import type { WalletSigner } from "../chain/signer";
 import { programErrorName, sendTx, TxError } from "../chain/tx";
@@ -23,7 +31,8 @@ const backOnSolana = async (keys: MatchKeys) => {
   const info = await base.getAccountInfo(keys.game);
   return !info || info.owner.equals(PROGRAM_ID);
 };
-const tableClosed = async (keys: MatchKeys) => !(await base.getAccountInfo(keys.table));
+const tableClosed = async (keys: MatchKeys) =>
+  !(await base.getAccountInfo(keys.table));
 
 /**
  * Brings the game back from the rollup, once the match is Finished or past
@@ -31,10 +40,20 @@ const tableClosed = async (keys: MatchKeys) => !(await base.getAccountInfo(keys.
  * Returns once it's on Solana, or already settled. If the other tab already
  * sent it, waits for theirs instead of failing.
  */
-export async function undelegate(signer: Keypair | WalletSigner, s: Pick<Seat, "keys" | "tee">): Promise<void> {
+export async function undelegate(
+  signer: Keypair | WalletSigner,
+  s: Pick<Seat, "keys" | "tee">
+): Promise<void> {
   const { keys } = s;
   if (await backOnSolana(keys)) return;
-  const ix = await m.undelegateGame().accountsPartial({ payer: signer.publicKey, ...rollupAccounts(keys), ...permissionAccounts(keys) }).instruction();
+  const ix = await m
+    .undelegateGame()
+    .accountsPartial({
+      payer: signer.publicKey,
+      ...rollupAccounts(keys),
+      ...permissionAccounts(keys),
+    })
+    .instruction();
   try {
     await sendTx({ conn: s.tee, ixs: [ix] }, signer);
   } catch (e) {
@@ -53,7 +72,10 @@ export async function undelegate(signer: Keypair | WalletSigner, s: Pick<Seat, "
  * settle signature, or null if it was already settled (by the other tab, or
  * an earlier try).
  */
-export async function finishMatch(wallet: WalletSigner, s: Pick<Seat, "keys" | "tee"> & { session?: Keypair }): Promise<string | null> {
+export async function finishMatch(
+  wallet: WalletSigner,
+  s: Pick<Seat, "keys" | "tee"> & { session?: Keypair }
+): Promise<string | null> {
   const { keys } = s;
   if (await tableClosed(keys)) return null;
   if (s.session) {
@@ -67,14 +89,28 @@ export async function finishMatch(wallet: WalletSigner, s: Pick<Seat, "keys" | "
   }
   const game = await fetchGame(base, keys.game);
   if (!game) return null; // settle closed it between our checks
-  if (game.winner == null) throw new TxError("The match has no winner yet", "MatchNotFinished");
+  if (game.winner == null)
+    throw new TxError("The match has no winner yet", "MatchNotFinished");
   const winner = game.players[game.winner];
   const winnerToken = usdcOf(winner);
   const settle = await m
     .settle()
-    .accountsPartial({ table: keys.table, ...rollupAccounts(keys), mint: USDC_MINT, winnerToken, vault: keys.vault, creator: keys.creator, tokenProgram: TOKEN_PROGRAM_ID })
+    .accountsPartial({
+      table: keys.table,
+      ...rollupAccounts(keys),
+      mint: USDC_MINT,
+      winnerToken,
+      vault: keys.vault,
+      creator: keys.creator,
+      tokenProgram: TOKEN_PROGRAM_ID,
+    })
     .instruction();
-  const ata = createAssociatedTokenAccountIdempotentInstruction(wallet.publicKey, winnerToken, winner, USDC_MINT);
+  const ata = createAssociatedTokenAccountIdempotentInstruction(
+    wallet.publicKey,
+    winnerToken,
+    winner,
+    USDC_MINT
+  );
   try {
     return await sendTx({ conn: base, ixs: [ata, settle] }, wallet);
   } catch (e) {

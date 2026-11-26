@@ -78,7 +78,7 @@ export function LiveTable({ seat, table, seats, busy, onCollect, onRefund, onGam
           <CardDescription className="text-base/relaxed">
             <span className="font-mono font-semibold text-brass">{formatUsdc(table.stake * 2)} USDC</span>
             {iWon
-              ? " is waiting in escrow. Collect it to bring the game back to Solana and pay out."
+              ? ` is waiting in escrow: your ${formatUsdc(table.stake)} USDC stake back plus your opponent’s ${formatUsdc(table.stake)}. Collect it to pay out.`
               : ` goes to ${seats[opp].name}. Either of you can send the payout.`}
           </CardDescription>
         </CardHeader>

@@ -4,7 +4,8 @@ import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { permissionPdaFromAccount } from "@magicblock-labs/ephemeral-rollups-sdk";
 import { PROGRAM_ID, USDC_MINT } from "../config";
 
-const pda = (...seeds: Buffer[]) => PublicKey.findProgramAddressSync(seeds, PROGRAM_ID)[0];
+const pda = (...seeds: Buffer[]) =>
+  PublicKey.findProgramAddressSync(seeds, PROGRAM_ID)[0];
 
 /** Every address of one match. Seat 0 is the creator, seat 1 the opponent. */
 export interface MatchKeys {
@@ -19,8 +20,16 @@ export interface MatchKeys {
   handOpponent: PublicKey;
 }
 
-export function matchKeys(creator: PublicKey, opponent: PublicKey, tableId: BN): MatchKeys {
-  const table = pda(Buffer.from("table"), creator.toBuffer(), tableId.toArrayLike(Buffer, "le", 8));
+export function matchKeys(
+  creator: PublicKey,
+  opponent: PublicKey,
+  tableId: BN
+): MatchKeys {
+  const table = pda(
+    Buffer.from("table"),
+    creator.toBuffer(),
+    tableId.toArrayLike(Buffer, "le", 8)
+  );
   const game = pda(Buffer.from("game"), table.toBuffer());
   return {
     tableId,
@@ -31,7 +40,11 @@ export function matchKeys(creator: PublicKey, opponent: PublicKey, tableId: BN):
     game,
     deck: pda(Buffer.from("deck"), game.toBuffer()),
     handCreator: pda(Buffer.from("hand"), game.toBuffer(), creator.toBuffer()),
-    handOpponent: pda(Buffer.from("hand"), game.toBuffer(), opponent.toBuffer()),
+    handOpponent: pda(
+      Buffer.from("hand"),
+      game.toBuffer(),
+      opponent.toBuffer()
+    ),
   };
 }
 
@@ -53,10 +66,15 @@ export const permissionAccounts = (k: MatchKeys) => ({
 export const seatOf = (k: MatchKeys, wallet: PublicKey): 0 | 1 | null =>
   wallet.equals(k.creator) ? 0 : wallet.equals(k.opponent) ? 1 : null;
 
-export const handOf = (k: MatchKeys, seat: 0 | 1) => (seat === 0 ? k.handCreator : k.handOpponent);
+export const handOf = (k: MatchKeys, seat: 0 | 1) =>
+  seat === 0 ? k.handCreator : k.handOpponent;
 
 /** Signs the program's VRF requests (`#[vrf]`'s program_identity). */
-export const vrfIdentity = PublicKey.findProgramAddressSync([Buffer.from("identity")], PROGRAM_ID)[0];
+export const vrfIdentity = PublicKey.findProgramAddressSync(
+  [Buffer.from("identity")],
+  PROGRAM_ID
+)[0];
 
 /** A wallet's USDC account (its associated token account). */
-export const usdcAccount = (owner: PublicKey) => getAssociatedTokenAddressSync(USDC_MINT, owner);
+export const usdcAccount = (owner: PublicKey) =>
+  getAssociatedTokenAddressSync(USDC_MINT, owner);

@@ -8,7 +8,11 @@ export const base = new Connection(BASE_RPC, "confirmed");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Polls `fn` once a second until it returns something truthy. */
-export async function waitFor<T>(what: string, fn: () => Promise<T | null | undefined | false>, seconds: number): Promise<T> {
+export async function waitFor<T>(
+  what: string,
+  fn: () => Promise<T | null | undefined | false>,
+  seconds: number
+): Promise<T> {
   for (let i = 0; i < seconds; i++) {
     const v = await fn().catch(() => null);
     if (v) return v as T;

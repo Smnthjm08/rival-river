@@ -14,7 +14,11 @@ const noWallet = {
 
 export const program = new Program<RivalRiver>(
   idl as RivalRiver,
-  new AnchorProvider(new Connection(BASE_RPC, "confirmed"), noWallet as never, {}),
+  new AnchorProvider(
+    new Connection(BASE_RPC, "confirmed"),
+    noWallet as never,
+    {}
+  )
 );
 
 /** Error names from the IDL, by code (6000, 6001, ...). */

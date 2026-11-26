@@ -6,7 +6,10 @@
 //!   undelegate     a player (see finish.ts), past the match deadline, to
 //!                  bring a refunded game back from the rollup.
 //!   closeRefunded  anyone, after that: returns all the rent to the creator.
-import { createAssociatedTokenAccountIdempotentInstruction, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import {
+  createAssociatedTokenAccountIdempotentInstruction,
+  TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
 import { SETTLE_GRACE_SECONDS, USDC_MINT } from "../config";
 import { base } from "../chain/connection";
 import { rollupAccounts, usdcAccount, type MatchKeys } from "../chain/pdas";
@@ -26,7 +29,10 @@ export function refundOpensAt(t: TableView): number | null {
 
 /** Returns both stakes. Recreates either player's USDC account if it was closed. */
 export async function refund(wallet: WalletSigner, keys: MatchKeys) {
-  const [creatorToken, opponentToken] = [usdcAccount(keys.creator), usdcAccount(keys.opponent)];
+  const [creatorToken, opponentToken] = [
+    usdcAccount(keys.creator),
+    usdcAccount(keys.opponent),
+  ];
   const ix = await m
     .refund()
     .accountsPartial({
@@ -41,8 +47,18 @@ export async function refund(wallet: WalletSigner, keys: MatchKeys) {
     })
     .instruction();
   const atas = [
-    createAssociatedTokenAccountIdempotentInstruction(wallet.publicKey, creatorToken, keys.creator, USDC_MINT),
-    createAssociatedTokenAccountIdempotentInstruction(wallet.publicKey, opponentToken, keys.opponent, USDC_MINT),
+    createAssociatedTokenAccountIdempotentInstruction(
+      wallet.publicKey,
+      creatorToken,
+      keys.creator,
+      USDC_MINT
+    ),
+    createAssociatedTokenAccountIdempotentInstruction(
+      wallet.publicKey,
+      opponentToken,
+      keys.opponent,
+      USDC_MINT
+    ),
   ];
   return sendTx({ conn: base, ixs: [...atas, ix] }, wallet);
 }
@@ -51,7 +67,11 @@ export async function refund(wallet: WalletSigner, keys: MatchKeys) {
 export async function closeRefunded(wallet: WalletSigner, keys: MatchKeys) {
   const ix = await m
     .closeRefunded()
-    .accountsPartial({ table: keys.table, ...rollupAccounts(keys), creator: keys.creator })
+    .accountsPartial({
+      table: keys.table,
+      ...rollupAccounts(keys),
+      creator: keys.creator,
+    })
     .instruction();
   return sendTx({ conn: base, ixs: [ix] }, wallet);
 }

@@ -19,6 +19,7 @@ export function PotPill({ amount }: { amount: number }) {
     <div className="flex items-center gap-2.5 rounded-full border border-brass/50 bg-ink px-4.5 py-2">
       <span className="text-xs font-semibold tracking-[0.12em] text-mist uppercase">Pot</span>
       <span className="font-mono text-xl font-semibold text-brass tabular-nums">{amount}</span>
+      <span className="text-xs text-mist">chips</span>
     </div>
   );
 }
@@ -28,7 +29,7 @@ export function BetPill({ amount }: { amount: number }) {
   return (
     <div className="flex items-center gap-2 rounded-full bg-ink/60 px-3.5 py-1.5 font-mono text-sm tabular-nums">
       <ChipIcon />
-      Bet {amount}
+      Bet {amount} chips
     </div>
   );
 }

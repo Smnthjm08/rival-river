@@ -11,14 +11,22 @@ import { store } from "../session/storage";
  * token is kept for the tab, so reloading doesn't ask again. Pass a session
  * keypair (see asSigner) to sign in with no wallet prompt at all.
  */
-const tokenKey = (wallet: { toBase58(): string }) => `rr:tee-token:${wallet.toBase58()}`;
+const tokenKey = (wallet: { toBase58(): string }) =>
+  `rr:tee-token:${wallet.toBase58()}`;
 
-export async function teeConnection(wallet: Pick<WalletSigner, "publicKey" | "signMessage">): Promise<Connection> {
+export async function teeConnection(
+  wallet: Pick<WalletSigner, "publicKey" | "signMessage">
+): Promise<Connection> {
   const key = tokenKey(wallet.publicKey);
-  let saved = JSON.parse(store.get(key) ?? "null") as { token: string; expiresAt: number } | null;
+  let saved = JSON.parse(store.get(key) ?? "null") as {
+    token: string;
+    expiresAt: number;
+  } | null;
   // A minute of margin so a token doesn't expire mid-request.
   if (!saved || saved.expiresAt < Date.now() + 60_000) {
-    saved = await getAuthToken(TEE_RPC, wallet.publicKey, (m) => wallet.signMessage(m));
+    saved = await getAuthToken(TEE_RPC, wallet.publicKey, (m) =>
+      wallet.signMessage(m)
+    );
     store.set(key, JSON.stringify(saved));
   }
   const url = new URL(TEE_RPC);
@@ -34,7 +42,9 @@ export const asSigner = (kp: Keypair) => ({
 
 /** True if this tab still holds an unexpired TEE login for the wallet, so teeConnection won't prompt. */
 export function hasTeeLogin(wallet: { toBase58(): string }): boolean {
-  const saved = JSON.parse(store.get(tokenKey(wallet)) ?? "null") as { expiresAt: number } | null;
+  const saved = JSON.parse(store.get(tokenKey(wallet)) ?? "null") as {
+    expiresAt: number;
+  } | null;
   return !!saved && saved.expiresAt > Date.now() + 60_000;
 }
 
@@ -49,5 +59,7 @@ export function clearTeeLogin(wallet: { toBase58(): string }) {
  * in again, Game included, since it isn't public either.
  */
 export function isTeeAuthError(e: unknown): boolean {
-  return /401|InvalidToken/.test(String((e as { message?: string })?.message ?? e));
+  return /401|InvalidToken/.test(
+    String((e as { message?: string })?.message ?? e)
+  );
 }

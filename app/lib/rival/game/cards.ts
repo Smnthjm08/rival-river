@@ -8,4 +8,8 @@ export interface Card {
   suit: (typeof SUITS)[number];
 }
 
-export const card = (id: number): Card => ({ id, rank: RANKS[id % 13], suit: SUITS[Math.floor(id / 13)] });
+export const card = (id: number): Card => ({
+  id,
+  rank: RANKS[id % 13],
+  suit: SUITS[Math.floor(id / 13)],
+});
