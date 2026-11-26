@@ -1,6 +1,7 @@
 "use client";
 
 import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react";
+import { MotionConfig } from "motion/react";
 import { BASE_RPC } from "@/lib/rival";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -15,7 +16,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <ConnectionProvider endpoint={BASE_RPC}>
       <WalletProvider wallets={[]} autoConnect>
         <TooltipProvider>
-          {children}
+          {/* Card deals and flips skip their movement for "reduce motion". */}
+          <MotionConfig reducedMotion="user">{children}</MotionConfig>
           <Toaster theme="dark" position="bottom-right" />
         </TooltipProvider>
       </WalletProvider>

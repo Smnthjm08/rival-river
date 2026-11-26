@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { HourglassIcon, ShuffleIcon, TrophyIcon } from "lucide-react";
+import { CheckIcon, HourglassIcon, ShuffleIcon, TrophyIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,6 +11,7 @@ import { ActionBar } from "@/components/rr/table/action-bar";
 import { Felt, type SeatInfo } from "@/components/rr/table/felt";
 import { MatchSidebar } from "@/components/rr/table/match-sidebar";
 import { useSecondsLeft } from "@/components/rr/table-pieces";
+import { cn } from "@/lib/utils";
 import { useMatch } from "@/hooks/use-match";
 import { formatUsdc } from "@/hooks/use-usdc-balance";
 import { refundOpensAt, undelegate, type GameView, type Seat, type TableView } from "@/lib/rival";
@@ -69,10 +70,10 @@ export function LiveTable({ seat, table, seats, busy, onCollect, onRefund, onGam
   if (game.phase === "finished") {
     const iWon = game.winner === me;
     below = (
-      <Card size="lg" className="border border-brass/45" role="dialog" aria-labelledby="match-over">
+      <Card size="lg" className="rounded-[1.25rem] border border-brass/45" role="dialog" aria-labelledby="match-over">
         <CardHeader>
-          <CardTitle id="match-over" className="flex items-center gap-3 font-heading text-4xl font-extrabold tracking-tight">
-            {iWon && <TrophyIcon aria-hidden="true" className="size-8 text-brass" />}
+          <CardTitle id="match-over" className="flex items-center gap-3 font-heading text-3xl font-extrabold tracking-tight">
+            {iWon && <TrophyIcon aria-hidden="true" className="size-7 text-brass" />}
             {iWon ? "You won the match" : `${seats[opp].name} won the match`}
           </CardTitle>
           <CardDescription className="text-base/relaxed">
@@ -83,7 +84,7 @@ export function LiveTable({ seat, table, seats, busy, onCollect, onRefund, onGam
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Button size="xl" onClick={onCollect} disabled={!!busy}>
+          <Button size="xl" className="w-full" onClick={onCollect} disabled={!!busy}>
             {busy && <Spinner data-icon="inline-start" />}
             {busy ?? (iWon ? "Collect winnings" : "Pay the winner")}
           </Button>
@@ -107,17 +108,7 @@ export function LiveTable({ seat, table, seats, busy, onCollect, onRefund, onGam
       </Alert>
     );
   } else if (game.phase === "dealing") {
-    below = (
-      <Alert variant="live" role="status">
-        <ShuffleIcon />
-        <AlertTitle className="text-base">{hand?.hasSecret ? "Shuffling the deck" : "Sealing your secret"}</AlertTitle>
-        <AlertDescription className="text-sm">
-          {hand?.hasSecret
-            ? "Waiting for both secrets and the VRF oracle. Usually under a second."
-            : "Your browser adds a random secret to the shuffle, so nobody, not even the oracle, can know the deck."}
-        </AlertDescription>
-      </Alert>
-    );
+    below = <ShuffleSteps hand={game.handNumber} secretIn={!!hand?.hasSecret} />;
   } else if (BETTING.has(game.phase)) {
     below = <ActionBar game={game} me={me} opponentName={seats[opp].name} acting={acting} onAct={act} />;
   } else {
@@ -134,9 +125,9 @@ export function LiveTable({ seat, table, seats, busy, onCollect, onRefund, onGam
     <div className="flex flex-wrap gap-6">
       <section aria-label="Table" className="flex min-w-0 flex-[999_1_720px] flex-col gap-4.5">
         <Felt game={game} hand={hand} me={me} seats={seats} lastResult={lastResult} />
-        {below}
       </section>
       <MatchSidebar
+        controls={below}
         game={game}
         me={me}
         names={[seats[0].name, seats[1].name]}
@@ -146,5 +137,46 @@ export function LiveTable({ seat, table, seats, busy, onCollect, onRefund, onGam
         lastResult={lastResult}
       />
     </div>
+  );
+}
+
+/**
+ * What the shuffle is waiting on, step by step. Each tick follows the chain:
+ * your secret is in your Hand; the opponent's secret and the VRF answer
+ * aren't visible to you, so that step spins until the cards arrive.
+ */
+export function ShuffleSteps({ hand, secretIn }: { hand: number; secretIn: boolean }) {
+  const steps: { label: string; state: "done" | "now" | "later" }[] = [
+    { label: "Blinds posted", state: "done" },
+    { label: secretIn ? "Your secret is in" : "Adding your browser’s secret", state: secretIn ? "done" : "now" },
+    { label: "Opponent’s secret + MagicBlock VRF", state: secretIn ? "now" : "later" },
+    { label: "Dealt privately in the TEE", state: "later" },
+  ];
+  return (
+    <Card size="lg" className="rounded-[1.25rem] border border-river/40" role="status">
+      <CardContent className="flex flex-col gap-3.5">
+        <span className="flex items-center gap-2 font-heading text-xl font-extrabold">
+          <ShuffleIcon aria-hidden="true" className="size-5 text-river" />
+          Shuffling hand {hand}
+        </span>
+        <ol className="flex flex-col gap-2.5">
+          {steps.map((s) => (
+            <li key={s.label} className={cn("flex items-center gap-2.5 text-[15px]", s.state === "later" && "text-muted-foreground")}>
+              {s.state === "done" ? (
+                <CheckIcon aria-hidden="true" className="size-4.5 text-river" strokeWidth={2.6} />
+              ) : s.state === "now" ? (
+                <Spinner className="size-4.5 text-brass" />
+              ) : (
+                <span aria-hidden="true" className="size-4.5 rounded-full border-2 border-foreground/20" />
+              )}
+              {s.label}
+            </li>
+          ))}
+        </ol>
+        <span className="text-[13px]/relaxed text-muted-foreground">
+          Nobody can predict the deck: it mixes both players’ secrets with MagicBlock’s verifiable randomness.
+        </span>
+      </CardContent>
+    </Card>
   );
 }

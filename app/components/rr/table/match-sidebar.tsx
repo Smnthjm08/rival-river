@@ -16,16 +16,19 @@ interface MatchSidebarProps {
   keys: MatchKeys;
   results: HandResult[];
   lastResult: HandResult | null;
+  /** Turn controls or the hand's status: top of the column, so no scrolling to act. */
+  controls?: React.ReactNode;
 }
 
 /** Right-hand column: what's at stake, how the match is going, and why the deck is fair. */
-export function MatchSidebar({ game, me, names, stake, keys, results, lastResult }: MatchSidebarProps) {
+export function MatchSidebar({ game, me, names, stake, keys, results, lastResult, controls }: MatchSidebarProps) {
   const opp = (1 - me) as 0 | 1;
   const byHand = new Map(results.map((r) => [r.handNumber, r]));
   const hands = Array.from({ length: MAX_HANDS }, (_, i) => i + 1);
 
   return (
-    <aside aria-label="Match details" className="flex max-w-full min-w-0 flex-[1_1_300px] flex-col gap-4">
+    <aside aria-label="Match details" className="flex max-w-full min-w-0 flex-[1_1_340px] flex-col gap-4">
+      {controls}
       <Card size="lg" className="rounded-[1.25rem]">
         <CardContent className="flex flex-col gap-1.5">
           <Eyebrow>Winner takes</Eyebrow>

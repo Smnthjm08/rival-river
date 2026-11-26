@@ -1,9 +1,11 @@
 import { LockIcon } from "lucide-react";
+import { motion } from "motion/react";
 import { Badge } from "@/components/ui/badge";
 import type { GameView, HandResult, HandView } from "@/lib/rival";
-import { EmptyCardSlot, PlayingCard } from "@/components/rr/playing-card";
+import { EmptyCardSlot } from "@/components/rr/playing-card";
 import { SeatAvatar, type Character, type SeatState } from "@/components/rr/seat-avatar";
 import { BetPill, DealerButton, PotPill } from "@/components/rr/table-pieces";
+import { DealtCard, RevealedCard, ShufflingDeck } from "@/components/rr/table/animated-cards";
 import { cn } from "@/lib/utils";
 
 const BETTING = new Set(["preflop", "flop", "turn", "river"]);
@@ -72,6 +74,11 @@ export function Felt({ game, hand, me, seats, lastResult }: FeltProps) {
   const shown = game.shown;
   const pot = game.pot;
   const myCards = shown ? shown[me] : hand?.cards ?? null;
+  const n = game.handNumber;
+  // The opponent's cards are on the table while the hand is live, or shown.
+  const oppHasCards = BETTING.has(game.phase) || !!shown;
+  // Dealt like a real dealer: one each, then one each again, opponent first.
+  const dealDelay = (round: number, mine: boolean) => round * 0.3 + (mine ? 0.15 : 0);
 
   return (
     <div className="relative flex w-full flex-col items-center justify-between gap-6 rounded-[2.5rem] border-[12px] border-rail bg-felt px-4 py-8 shadow-[inset_0_0_0_2px_rgb(63_182_168/0.16),0_30px_60px_rgb(0_0_0/0.35)] md:aspect-[16/10] md:rounded-[50%] md:border-[16px] md:px-20 md:py-10">
@@ -80,17 +87,19 @@ export function Felt({ game, hand, me, seats, lastResult }: FeltProps) {
       {/* Opponent */}
       <div className="flex flex-col items-center gap-3">
         <div className="flex flex-wrap items-center justify-center gap-4">
-          <div className="flex">
+          <div className="flex h-[81px] min-w-24">
             {shown ? (
               <>
-                <div className="-rotate-6"><PlayingCard card={shown[opp][0]} width={58} /></div>
-                <div className="-ml-5 rotate-6"><PlayingCard card={shown[opp][1]} width={58} /></div>
+                <div className="-rotate-6"><RevealedCard key={`shown-${n}-0`} card={shown[opp][0]} width={58} /></div>
+                <div className="-ml-5 rotate-6"><RevealedCard key={`shown-${n}-1`} card={shown[opp][1]} width={58} delay={0.12} /></div>
               </>
             ) : (
-              <>
-                <div className="-rotate-6"><PlayingCard faceDown width={58} /></div>
-                <div className="-ml-5 rotate-6"><PlayingCard faceDown width={58} /></div>
-              </>
+              oppHasCards && (
+                <>
+                  <div className="-rotate-6"><DealtCard key={`opp-${n}-0`} card={null} width={58} from={{ x: 40, y: 170 }} delay={dealDelay(0, false)} /></div>
+                  <div className="-ml-5 rotate-6"><DealtCard key={`opp-${n}-1`} card={null} width={58} from={{ x: 10, y: 170 }} delay={dealDelay(1, false)} /></div>
+                </>
+              )
             )}
           </div>
           <SeatPlate info={seats[opp]} stack={game.stacks[opp]} state={seatState(game, opp, lastResult)} dealer={game.dealer === opp} mine={false} />
@@ -98,18 +107,23 @@ export function Felt({ game, hand, me, seats, lastResult }: FeltProps) {
         {game.bets[opp] > 0 && <BetPill amount={game.bets[opp]} />}
       </div>
 
-      {/* Board and pot */}
+      {/* Board and pot; the deck while the hand is shuffled */}
       <div className="flex flex-col items-center gap-3.5">
         <PotPill amount={pot + game.bets[0] + game.bets[1]} />
-        <div className="flex gap-1.5 sm:gap-2.5">
-          {BOARD_SLOTS.map((label, i) =>
-            game.board[i] ? (
-              <PlayingCard key={label} card={game.board[i]} width="board" />
-            ) : (
-              <EmptyCardSlot key={label} label={`${label}, not dealt yet`} width="board" />
-            ),
-          )}
-        </div>
+        {game.phase === "dealing" ? (
+          <ShufflingDeck label={`Shuffling hand ${n}`} />
+        ) : (
+          <div className="flex gap-1.5 sm:gap-2.5">
+            {BOARD_SLOTS.map((label, i) =>
+              game.board[i] ? (
+                // The flop turns over one card after another.
+                <RevealedCard key={`${n}-${i}`} card={game.board[i]} width="board" delay={i < 3 ? i * 0.12 : 0} />
+              ) : (
+                <EmptyCardSlot key={label} label={`${label}, not dealt yet`} width="board" />
+              ),
+            )}
+          </div>
+        )}
       </div>
 
       {/* You */}
@@ -121,8 +135,8 @@ export function Felt({ game, hand, me, seats, lastResult }: FeltProps) {
             <div className="flex gap-2">
               {myCards ? (
                 <>
-                  <div className="-rotate-[4deg]"><PlayingCard card={myCards[0]} width="hand" /></div>
-                  <div className="rotate-[4deg]"><PlayingCard card={myCards[1]} width="hand" /></div>
+                  <div className="-rotate-[4deg]"><DealtCard key={`me-${n}-0`} card={myCards[0]} width="hand" from={{ x: 60, y: -210 }} delay={dealDelay(0, true)} /></div>
+                  <div className="rotate-[4deg]"><DealtCard key={`me-${n}-1`} card={myCards[1]} width="hand" from={{ x: -40, y: -210 }} delay={dealDelay(1, true)} /></div>
                 </>
               ) : (
                 <>
@@ -132,10 +146,17 @@ export function Felt({ game, hand, me, seats, lastResult }: FeltProps) {
               )}
             </div>
             {myCards && !shown && (
-              <span className="flex items-center gap-1.5 rounded-full border border-river bg-ink px-2.5 py-1 text-[13px] font-semibold text-river">
+              // Fades in once your cards have turned over.
+              <motion.span
+                key={`private-${n}`}
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 1, duration: 0.3 }}
+                className="flex items-center gap-1.5 rounded-full border border-river bg-ink px-2.5 py-1 text-[13px] font-semibold text-river"
+              >
                 <LockIcon aria-hidden="true" className="size-3.5" strokeWidth={2.4} />
                 Only you can see these
-              </span>
+              </motion.span>
             )}
           </div>
         </div>

@@ -20,8 +20,9 @@ interface ActionBarProps {
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 /**
- * Bottom bar of the table. On your turn: Fold, Check/Call, and a raise
- * slider with ½ pot / Pot / All-in. Otherwise: whose turn it is and their clock.
+ * Turn controls, at the top of the right-hand column. On your turn: Fold,
+ * Check/Call, and a raise slider with ½ pot / Pot / All-in. Otherwise: whose
+ * turn it is and their clock.
  */
 export function ActionBar({ game, me, opponentName, acting, onAct }: ActionBarProps) {
   // Before the clock's first tick, assume a full turn rather than "out of time".
@@ -73,8 +74,8 @@ export function ActionBar({ game, me, opponentName, acting, onAct }: ActionBarPr
   ];
 
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-[1.25rem] bg-card p-4 ring-2 ring-brass/70">
-      <div className="mr-2 flex items-center gap-2.5">
+    <div className="flex flex-col gap-3.5 rounded-[1.25rem] bg-card p-4 ring-2 ring-brass/70">
+      <div className="flex items-center gap-2.5">
         <TurnTimer secondsLeft={secondsLeft} total={TURN_SECONDS} />
         <div className="flex flex-col">
           <span className="text-[15px] font-semibold text-brass">Your turn</span>
@@ -82,32 +83,37 @@ export function ActionBar({ game, me, opponentName, acting, onAct }: ActionBarPr
         </div>
       </div>
 
-      <Button variant="fold" size="xl" disabled={acting} onClick={() => act({ fold: {} })}>
-        Fold
-      </Button>
-      <Button variant="secondary" size="xl" disabled={acting} onClick={() => act(toCall === 0 ? { check: {} } : { call: {} })}>
-        {callLabel}
-      </Button>
+      <div className="grid grid-cols-2 gap-2">
+        <Button variant="fold" size="xl" disabled={acting} onClick={() => act({ fold: {} })}>
+          Fold
+        </Button>
+        <Button variant="secondary" size="xl" disabled={acting} onClick={() => act(toCall === 0 ? { check: {} } : { call: {} })}>
+          {callLabel}
+        </Button>
+      </div>
 
       {canRaise && (
-        <div className="flex min-w-0 flex-[1_1_320px] flex-wrap items-center gap-2.5">
+        <div className="flex flex-col gap-2.5">
           {maxTo > minTo && (
-            <Slider
-              aria-label="Raise amount"
-              min={minTo}
-              max={maxTo}
-              step={1}
-              value={[raiseTo]}
-              onValueChange={(v) => setChosen(Array.isArray(v) ? v[0] : v)}
-              className="min-w-30 flex-[1_1_140px]"
-            />
+            <>
+              <Slider
+                aria-label="Raise amount"
+                min={minTo}
+                max={maxTo}
+                step={1}
+                value={[raiseTo]}
+                onValueChange={(v) => setChosen(Array.isArray(v) ? v[0] : v)}
+                className="py-2"
+              />
+              <div className="grid grid-cols-3 gap-2">
+                {presets.map((p) => (
+                  <Button key={p.label} variant="outline" size="lg" disabled={acting} onClick={() => setChosen(clamp(p.to, minTo, maxTo))}>
+                    {p.label}
+                  </Button>
+                ))}
+              </div>
+            </>
           )}
-          {maxTo > minTo &&
-            presets.map((p) => (
-              <Button key={p.label} variant="outline" size="lg" disabled={acting} onClick={() => setChosen(clamp(p.to, minTo, maxTo))}>
-                {p.label}
-              </Button>
-            ))}
           <Button size="xl" disabled={acting} onClick={() => act({ raise: { to: raiseTo } })}>
             {acting && <Spinner data-icon="inline-start" />}
             <span className="font-sans">{raiseLabel.replace(/\d+$/, "")}</span>
