@@ -83,6 +83,7 @@ pub fn init_game_handler(ctx: Context<InitGame>) -> Result<()> {
         session_keys: table.session_keys,
         hand_number: 0,
         permissions_ready: false,
+        checked_in: [false; 2],
         stacks: [STARTING_STACK; 2],
         bets: [0; 2],
         pot: 0,

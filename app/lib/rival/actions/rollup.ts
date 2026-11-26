@@ -124,6 +124,21 @@ export type Action =
 
 /** The match's moves. All signed by the session key: no wallet prompts. */
 export const moves = {
+  /** "I'm at the table": hand 1 waits until both players have sent it. */
+  checkIn: async (s: Seat) =>
+    sendTx(
+      {
+        conn: s.tee,
+        ixs: [
+          await m
+            .checkIn()
+            .accountsPartial({ player: s.session.publicKey, game: s.keys.game })
+            .instruction(),
+        ],
+      },
+      s.session
+    ),
+
   startHand: async (s: Seat) =>
     sendTx(
       {

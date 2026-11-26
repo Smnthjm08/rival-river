@@ -85,7 +85,7 @@ fn create_table(svm: &mut LiteSVM, creator: &Keypair, join: bool) -> (Pubkey, Ke
     if join {
         let ix = Instruction::new_with_bytes(
             rival_river::id(),
-            &rival_river::instruction::JoinTable { session_key: session_keys()[1] }.data(),
+            &rival_river::instruction::JoinTable { session_key: session_keys()[1], stake: STAKE }.data(),
             rival_river::accounts::JoinTable {
                 opponent: opponent.pubkey(),
                 invite: None,

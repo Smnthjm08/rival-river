@@ -2,6 +2,7 @@
 //! delegate_game handed over. Sending them to Solana fails.
 pub mod act;
 pub mod callback_shuffle;
+pub mod check_in;
 pub mod claim_timeout;
 pub mod init_permissions;
 pub mod request_shuffle;
@@ -12,6 +13,7 @@ pub mod undelegate_game;
 
 pub use act::*;
 pub use callback_shuffle::*;
+pub use check_in::*;
 pub use claim_timeout::*;
 pub use init_permissions::*;
 pub use request_shuffle::*;

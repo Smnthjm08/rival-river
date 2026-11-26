@@ -40,6 +40,8 @@ export interface GameView {
   players: Pair<PublicKey>;
   sessionKeys: Pair<PublicKey | null>;
   permissionsReady: boolean;
+  /** Who has shown up at the table; hand 1 needs both. */
+  checkedIn: Pair<boolean>;
   stacks: Pair<number>;
   bets: Pair<number>;
   pot: number;
@@ -119,6 +121,7 @@ export async function fetchGame(
     players: g.players as Pair<PublicKey>,
     sessionKeys: orNone(g.sessionKeys as PublicKey[]),
     permissionsReady: g.permissionsReady,
+    checkedIn: g.checkedIn as Pair<boolean>,
     stacks: g.stacks as Pair<number>,
     bets: g.bets as Pair<number>,
     pot: g.pot,

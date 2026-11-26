@@ -256,7 +256,7 @@ const initPermissionsIx = (payer: PublicKey) =>
 const undelegateIx = (payer: PublicKey) =>
   program.methods
     .undelegateGame()
-    .accountsPartial({ payer, ...matchAccounts, ...permissions })
+    .accountsPartial({ payer, ...matchAccounts })
     .instruction();
 const actIx = (player: PublicKey, action: any) =>
   program.methods
@@ -373,7 +373,7 @@ async function main() {
       base,
       [
         await program.methods
-          .joinTable(PublicKey.default)
+          .joinTable(PublicKey.default, new BN(STAKE))
           .accountsPartial({
             invite: null,
             opponent: opponent.publicKey,
@@ -529,7 +529,36 @@ async function main() {
   // Every move below is signed (and fee-paid) by an unfunded session key.
   const players = sessions;
   const teeOf = [teeC, teeO];
-  let firstSecretSig = "";
+  for (const [i, p] of players.entries()) {
+    sig(
+      `check_in (${i ? "opponent" : "creator"})`,
+      "rollup",
+      await send(
+        teeOf[i],
+        [
+          await program.methods
+            .checkIn()
+            .accountsPartial({ player: p.publicKey, game })
+            .instruction(),
+        ],
+        [p]
+      )
+    );
+  }
+  // The TEE answers an unauthorized reader with a redacted stub (signature
+  // only, no accounts, instructions or logs) — even the sender — so "seen"
+  // means the message itself came back.
+  const seen = async (conn: Connection, s: string) => {
+    const t = await conn
+      .getTransaction(s, {
+        maxSupportedTransactionVersion: 1,
+        commitment: "confirmed",
+      })
+      .catch(() => null);
+    return (t?.transaction.message.staticAccountKeys.length ?? 0) > 0;
+  };
+  /** The first hand's submit_secret transactions, [creator's, opponent's]. */
+  const secretSigs: string[] = [];
   for (let hand = 1; hand <= 10; hand++) {
     sig(
       `hand ${hand}: start_hand`,
@@ -566,25 +595,13 @@ async function main() {
         "rollup",
         s
       );
-      if (!firstSecretSig) firstSecretSig = s;
+      if (hand === 1) secretSigs.push(s);
     }
     if (hand === 1) {
-      // The TEE answers with a redacted stub (signature only, no accounts,
-      // instructions or logs) — even to the sender — so "seen" means the
-      // message itself came back.
-      const seen = async (conn: Connection) => {
-        const t = await conn
-          .getTransaction(firstSecretSig, {
-            maxSupportedTransactionVersion: 1,
-            commitment: "confirmed",
-          })
-          .catch(() => null);
-        return (t?.transaction.message.staticAccountKeys.length ?? 0) > 0;
-      };
       const [own, other, pub] = [
-        await seen(teeC),
-        await seen(teeO),
-        await seen(teePublic),
+        await seen(teeC, secretSigs[0]),
+        await seen(teeO, secretSigs[0]),
+        await seen(teePublic, secretSigs[0]),
       ];
       report.secretTxVisibility = {
         creatorSeesOwn: own,
@@ -697,6 +714,24 @@ async function main() {
     async () => (await base.getAccountInfo(game))?.owner.equals(PID),
     180
   );
+  // The history must stay private once the match has left the rollup: with
+  // both secrets and the VRF answer anyone can rebuild the decks.
+  const leaks: string[] = [];
+  for (const [owner, s] of secretSigs.entries()) {
+    const others = [
+      ["the other player", teeOf[1 - owner]],
+      ["the public", teePublic],
+    ] as const;
+    for (const [who, conn] of others)
+      if (await seen(conn, s))
+        leaks.push(`${who} reads seat ${owner}'s secret`);
+  }
+  check(
+    "(e) after the match, nobody else can fetch a submit_secret tx",
+    secretSigs.length === 2 && leaks.length === 0,
+    leaks.join("; ") || "both stayed private"
+  );
+
   const final = await readGame(base);
   const winner = final.winner as number;
   const winnerUsdc = [creatorUsdc, opponentUsdc][winner];

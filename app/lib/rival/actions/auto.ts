@@ -5,6 +5,7 @@ import { programErrorName } from "../chain/tx";
 
 /** A move nobody needs to click: the client sends it when it's due. */
 export type AutoStep =
+  | "checkIn"
   | "startHand"
   | "submitSecret"
   | "requestShuffle"
@@ -27,10 +28,12 @@ export function dueSteps(
   // and on the rollup a refused transaction still runs and is recorded, so
   // sending them would spam the TEE every poll until the tab closed.
   if (now > game.matchDeadline) return [];
+  if (!game.checkedIn[seat]) return ["checkIn"];
   const late = now > game.deadline;
   switch (game.phase) {
     case "waiting":
-      return ["startHand"];
+      // No hand until the other player has shown up too.
+      return game.checkedIn[1 - seat] ? ["startHand"] : [];
     case "dealing":
       // The opponent's Hand is private, so whether they've sent their secret
       // is unknown: request anyway, and SecretsMissing means "not yet".
@@ -124,6 +127,7 @@ export class HandTracker {
  * it first, or the opponent hasn't caught up. The next snapshot moves on.
  */
 const BENIGN: Record<AutoStep, string[]> = {
+  checkIn: [],
   startHand: ["HandInProgress"],
   submitSecret: ["SecretAlreadySubmitted"],
   requestShuffle: ["ShufflePending", "SecretsMissing", "NotDealing"],

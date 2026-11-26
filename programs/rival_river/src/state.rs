@@ -66,6 +66,9 @@ pub struct Game {
     /// Set by init_permissions. Until then every account on the private
     /// rollup is public, so no secrets (and therefore no cards) before it.
     pub permissions_ready: bool,
+    /// Set by check_in: this player's client is at the table. No hand starts
+    /// until both are, so nobody forfeits hands before they've shown up.
+    pub checked_in: [bool; 2],
 
     // ---- Chips. Always: stacks + bets + pot == 2 * STARTING_STACK ----
     /// Chips each player has behind (not yet bet).

@@ -34,6 +34,11 @@ approval to register a new key, then plays without approvals again.
 
 ## Match rules
 
+- **Check-in:** the first hand starts once both players’ tabs are at the
+  table, so nobody loses hands before they arrive. If one never does, the
+  stakes are refunded after the match deadline.
+- **Joining:** the join names the stake you agreed to. If the table has
+  changed since, it fails and nothing is paid.
 - **Blinds:** 5/10, 10/20, 20/40, 30/60, 40/80, 50/100 (one level per hand).
 - **Winning:** a player wins as soon as the other has no chips. After six
   hands, the chip leader wins. If stacks are level, sudden-death hands at

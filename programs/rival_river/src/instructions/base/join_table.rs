@@ -41,8 +41,13 @@ pub struct JoinTable<'info> {
 ///
 /// `session_key` (or Pubkey::default() for none) will sign the opponent's
 /// moves on the rollup.
-pub fn join_table_handler(ctx: Context<JoinTable>, session_key: Pubkey) -> Result<()> {
+///
+/// `stake` is what the opponent agreed to pay. The creator can cancel and
+/// reopen a table at the same address, so without it a join signed for one
+/// stake could pay a bigger one.
+pub fn join_table_handler(ctx: Context<JoinTable>, session_key: Pubkey, stake: u64) -> Result<()> {
     let a = &ctx.accounts;
+    require!(a.table.stake == stake, ErrorCode::StakeChanged);
     let none = Pubkey::default();
     let joiner = a.opponent.key();
     if a.table.opponent != none {

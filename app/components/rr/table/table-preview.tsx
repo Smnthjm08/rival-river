@@ -42,6 +42,7 @@ function sampleGame(stage: Stage, toAct: 0 | 1, now: number): GameView {
     players: [keys.creator, keys.opponent],
     sessionKeys: [null, null],
     permissionsReady: true,
+    checkedIn: [true, true],
     // Always: stacks + bets + pot = 200.
     stacks: early ? [65, 75] : [85, 55],
     bets: early ? [20, 40] : [0, 20],

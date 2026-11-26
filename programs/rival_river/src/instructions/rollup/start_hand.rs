@@ -5,14 +5,15 @@ use crate::error::ErrorCode;
 use crate::state::{Game, Phase};
 
 /// Runs on the rollup, between hands. Either player (wallet or session key)
-/// can start the next hand.
+/// can start the next hand, once both have checked in.
 #[derive(Accounts)]
 pub struct StartHand<'info> {
     #[account(constraint = game.seat_of(&player.key()).is_some() @ ErrorCode::NotAPlayer)]
     pub player: Signer<'info>,
 
     #[account(mut, seeds = [GAME_SEED, game.table.as_ref()], bump = game.bump,
-              constraint = game.phase == Phase::Waiting @ ErrorCode::HandInProgress)]
+              constraint = game.phase == Phase::Waiting @ ErrorCode::HandInProgress,
+              constraint = game.checked_in == [true; 2] @ ErrorCode::NotCheckedIn)]
     pub game: Account<'info, Game>,
 }
 

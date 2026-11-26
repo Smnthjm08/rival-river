@@ -33,8 +33,8 @@ pub mod rival_river {
         create_table::create_table_handler(ctx, table_id, opponent, stake, session_key, invite_key)
     }
 
-    pub fn join_table(ctx: Context<JoinTable>, session_key: Pubkey) -> Result<()> {
-        join_table::join_table_handler(ctx, session_key)
+    pub fn join_table(ctx: Context<JoinTable>, session_key: Pubkey, stake: u64) -> Result<()> {
+        join_table::join_table_handler(ctx, session_key, stake)
     }
 
     pub fn cancel_table(ctx: Context<CancelTable>) -> Result<()> {
@@ -68,6 +68,10 @@ pub mod rival_river {
 
     pub fn init_permissions(ctx: Context<InitPermissions>) -> Result<()> {
         init_permissions::init_permissions_handler(ctx)
+    }
+
+    pub fn check_in(ctx: Context<CheckIn>) -> Result<()> {
+        check_in::check_in_handler(ctx)
     }
 
     pub fn start_hand(ctx: Context<StartHand>) -> Result<()> {

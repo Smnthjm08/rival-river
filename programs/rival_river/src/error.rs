@@ -72,4 +72,8 @@ pub enum ErrorCode {
     NoWayToJoin,
     #[msg("Joining this table needs its invite link")]
     InviteRequired,
+    #[msg("The table's stake changed: check it and join again")]
+    StakeChanged,
+    #[msg("Both players must check in before the first hand")]
+    NotCheckedIn,
 }

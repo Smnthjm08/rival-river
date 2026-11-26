@@ -65,7 +65,11 @@ export function useMatch(
       try {
         const { game, hand } = await fetchMatch(seat.tee, seat.keys, seat.seat);
         if (game && !stop) {
-          const due = tracker.current!.due(game, hand);
+          // Check in only while the player can see the table: a background
+          // tab may be too slow for the turn clock that starts afterwards.
+          const due = tracker
+            .current!.due(game, hand)
+            .filter((step) => step !== "checkIn" || !document.hidden);
           const r = tracker.current!.lastResult;
           setState((s) => {
             const results =

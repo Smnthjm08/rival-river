@@ -131,6 +131,17 @@ export function LiveTable({ seat, table, seats, busy, onCollect, onRefund, onGam
     );
   } else if (BETTING.has(game.phase)) {
     below = <ActionBar game={game} me={me} opponentName={seats[opp].name} acting={acting} onAct={act} />;
+  } else if (game.handNumber === 0 && !game.checkedIn[opp]) {
+    below = (
+      <Alert variant="quiet" role="status" className={PINNED_ON_PHONES}>
+        <HourglassIcon />
+        <AlertTitle className="text-base">Waiting for {seats[opp].name} to open the table</AlertTitle>
+        <AlertDescription className="text-sm">
+          The first hand starts when you’re both here. If they never arrive, either of you can return both stakes
+          {refundIn ? ` in ${Math.ceil(refundIn / 60)} minutes` : " after the match deadline"}.
+        </AlertDescription>
+      </Alert>
+    );
   } else {
     below = (
       <Alert variant="quiet" role="status">

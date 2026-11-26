@@ -111,9 +111,14 @@ fn join_table_with(s: &mut Setup, signer: &Keypair, table: Pubkey, session_key: 
 
 /// With `invite`: the invite link's keypair co-signs, as on an open table.
 fn join_table_full(s: &mut Setup, signer: &Keypair, table: Pubkey, session_key: Pubkey, invite: Option<&Keypair>) -> bool {
+    join_table_at(s, signer, table, session_key, invite, STAKE)
+}
+
+/// `stake`: what the joiner agrees to pay.
+fn join_table_at(s: &mut Setup, signer: &Keypair, table: Pubkey, session_key: Pubkey, invite: Option<&Keypair>, stake: u64) -> bool {
     let ix = Instruction::new_with_bytes(
         rival_river::id(),
-        &rival_river::instruction::JoinTable { session_key }.data(),
+        &rival_river::instruction::JoinTable { session_key, stake }.data(),
         rival_river::accounts::JoinTable {
             opponent: signer.pubkey(),
             invite: invite.map(|k| k.pubkey()),
@@ -421,4 +426,21 @@ fn a_named_table_still_takes_only_that_wallet() {
     let table = table_pda(&creator.pubkey(), 1);
     assert!(!join_table_full(&mut s, &stranger, table, Pubkey::default(), Some(&Keypair::new())));
     assert!(join_table(&mut s, &friend, table));
+}
+
+/// The creator can reopen a table at the same address with a new stake. A
+/// join agreed at the old stake must not pay the new one.
+#[test]
+fn join_pays_only_the_agreed_stake() {
+    let mut s = setup();
+    let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    assert!(create_table(&mut s, 1, opponent.pubkey(), STAKE));
+    let table = table_pda(&creator.pubkey(), 1);
+    assert!(cancel_table(&mut s, &creator, table));
+    assert!(create_table(&mut s, 1, opponent.pubkey(), 3 * STAKE));
+
+    assert!(!join_table_at(&mut s, &opponent, table, Pubkey::default(), None, STAKE));
+    assert_eq!(wallet(&s, &opponent), 3 * STAKE, "nothing taken");
+    assert!(join_table_at(&mut s, &opponent, table, Pubkey::default(), None, 3 * STAKE));
+    assert_eq!(wallet(&s, &opponent), 0);
 }

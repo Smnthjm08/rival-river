@@ -113,7 +113,8 @@ const computeLimit = () =>
  */
 export async function joinTable(
   wallet: WalletSigner,
-  table: Pick<TableView, "keys">,
+  /** As the player saw it: the join fails if the stake has changed since. */
+  table: Pick<TableView, "keys" | "stake">,
   /** Open tables: the invite link's keypair, which co-signs. */
   invite: Keypair | null = null
 ) {
@@ -123,7 +124,7 @@ export async function joinTable(
   const keys = matchKeys(t.creator, wallet.publicKey, t.tableId);
   const session = sessionKeypair(keys.game, wallet.publicKey);
   const join = await m
-    .joinTable(session.publicKey)
+    .joinTable(session.publicKey, new BN(table.stake))
     .accountsPartial({
       opponent: wallet.publicKey,
       invite: invite?.publicKey ?? null,

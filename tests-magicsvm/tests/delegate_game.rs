@@ -137,7 +137,7 @@ fn setup_full(sessions: [Pubkey; 2], open: bool) -> Setup {
         },
     )));
     let join = ix(
-        instruction::JoinTable { session_key: sessions[1] },
+        instruction::JoinTable { session_key: sessions[1], stake: STAKE },
         accounts::JoinTable {
             opponent: key(&opponent),
             invite: open.then(|| key(&invite)),
@@ -381,12 +381,6 @@ fn undelegate_game_ix(s: &Setup, signer: &Keypair) -> Instruction {
             deck,
             hand_creator,
             hand_opponent,
-            game_permission: permission_of(game),
-            deck_permission: permission_of(deck),
-            hand_creator_permission: permission_of(hand_creator),
-            hand_opponent_permission: permission_of(hand_opponent),
-            permission_program: PERMISSION_PROGRAM_ID,
-            ephemeral_vault: EPHEMERAL_VAULT_ID,
             magic_program: MagicProgram::id(),
             magic_context: MAGIC_CONTEXT_ID,
         },
@@ -403,8 +397,29 @@ fn force_finish(s: &mut Setup) {
     });
 }
 
-/// init_game + delegate_game, ready for play on the rollup.
+/// delegated_empty() with both players checked in, ready for play.
 fn delegated() -> Setup {
+    let mut s = delegated_empty();
+    check_in_both(&mut s);
+    s
+}
+
+fn check_in(s: &mut Setup, signer: &Keypair) -> bool {
+    let game = s.game;
+    send(&mut s.svm, Ephemeral, signer, ix(
+        instruction::CheckIn {},
+        accounts::CheckIn { player: key(signer), game },
+    ))
+}
+
+fn check_in_both(s: &mut Setup) {
+    let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    assert!(check_in(s, &creator));
+    assert!(check_in(s, &opponent));
+}
+
+/// init_game + delegate_game: on the rollup, nobody checked in yet.
+fn delegated_empty() -> Setup {
     let mut s = setup();
     init_game(&mut s);
     let creator = s.creator.insecure_clone();
@@ -1291,26 +1306,23 @@ fn settled_table_cannot_be_delegated() {
     assert!(error_name(&mut s.svm, Base, &creator, &ixs).is_some(), "the table is gone");
 }
 
+/// The rollup judges who may read a past transaction by these permissions,
+/// so closing them would publish both secrets and the shuffle randomness.
+/// (MagicSVM doesn't model that history filter: scripts/smoke-devnet.ts
+/// checks it against the real TEE.)
 #[test]
-fn undelegate_closes_the_permissions_and_refunds_their_rent() {
-    let mut s = setup();
-    init_game(&mut s);
+fn undelegate_keeps_the_permissions() {
+    let mut s = private();
     let accounts = [s.game, s.deck, s.hand_creator, s.hand_opponent];
-    let funded = accounts.map(|a| s.svm.get_balance(&addr(a)).unwrap());
-    let creator = s.creator.insecure_clone();
-    assert!(delegate_game(&mut s, &creator));
-    assert!(init_permissions(&mut s, &creator));
-    for a in accounts {
-        assert!(s.svm.get_account_for(Ephemeral, &addr(permission_of(a))).is_some());
-    }
+    let before = accounts.map(|a| readers(&s.svm, a));
 
     force_finish(&mut s);
+    let creator = s.creator.insecure_clone();
     assert!(undelegate_game(&mut s, &creator));
     for a in accounts {
-        let p = s.svm.ephemeral().get_account(&addr(permission_of(a)));
-        assert!(p.map_or(true, |p| p.lamports == 0), "permission of {a} still open");
+        assert_eq!(owner(&s.svm, Base, a), rival_river::id());
     }
-    assert_eq!(accounts.map(|a| s.svm.get_balance(&addr(a)).unwrap()), funded);
+    assert_eq!(accounts.map(|a| readers(&s.svm, a)), before);
 }
 
 #[test]
@@ -2021,8 +2033,9 @@ fn session_key_makes_the_table_private_and_can_read_its_own_hand() {
 
 #[test]
 fn session_key_brings_the_finished_game_back() {
-    let (mut s, [c, _]) = staked_sessions();
+    let (mut s, [c, o]) = staked_sessions();
     assert!(init_permissions(&mut s, &c));
+    assert!(check_in(&mut s, &c) && check_in(&mut s, &o));
     assert!(start_hand(&mut s, &c));
     let early = undelegate_game_ix(&s, &c);
     assert_eq!(error_name(&mut s.svm, Ephemeral, &c, &[early]).as_deref(), Some("MatchNotFinished"));
@@ -2054,7 +2067,40 @@ fn an_open_table_joined_by_link_plays_on_the_rollup() {
     // The joiner's Hand is theirs alone.
     assert_eq!(readers(&s.svm, s.hand_opponent), (true, vec![key(&opponent), key(&sessions[1])], false));
 
+    assert!(check_in(&mut s, &sessions[0]) && check_in(&mut s, &sessions[1]));
     assert!(start_hand(&mut s, &sessions[0]));
     shuffle_and_deal(&mut s);
     assert!(read_hand(&s.svm, Ephemeral, s.hand_opponent).dealt, "the joiner was dealt in");
+}
+
+// ---- Check-in before the first hand ------------------------------------------
+
+#[test]
+fn no_hand_starts_until_both_players_check_in() {
+    let mut s = delegated_empty();
+    let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    let stranger = Keypair::new();
+    assert!(!check_in(&mut s, &stranger));
+
+    // The joiner alone, twice: the creator's seat stays empty.
+    assert!(check_in(&mut s, &opponent));
+    assert!(check_in(&mut s, &opponent), "safe to send again");
+    assert_eq!(read_game(&s.svm, Ephemeral, s.game).checked_in, [false, true]);
+    assert_eq!(start_hand_err(&mut s, &opponent).as_deref(), Some("NotCheckedIn"));
+    advance_clock(&mut s, TURN_SECONDS + 1);
+    assert_eq!(claim_timeout(&mut s, &opponent).as_deref(), Some("NotTimedOut"), "nothing to forfeit");
+
+    assert!(check_in(&mut s, &creator));
+    assert!(start_hand(&mut s, &opponent));
+}
+
+#[test]
+fn a_player_who_never_checks_in_loses_nothing() {
+    let mut s = delegated_empty();
+    let opponent = s.opponent.insecure_clone();
+    assert!(check_in(&mut s, &opponent));
+    advance_clock(&mut s, REFUNDABLE);
+    assert_eq!(refund(&mut s), None);
+    let tokens = [key(&s.creator), key(&s.opponent)].map(|p| ata(p, s.mint));
+    assert_eq!(tokens.map(|t| balance(&s.svm, t)), [Some(STAKE), Some(STAKE)]);
 }

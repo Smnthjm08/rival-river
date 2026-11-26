@@ -9,7 +9,6 @@ import {
 import { PROGRAM_ID, USDC_MINT } from "../config";
 import { base, waitFor } from "../chain/connection";
 import {
-  permissionAccounts,
   rollupAccounts,
   usdcAccount as usdcOf,
   type MatchKeys,
@@ -48,11 +47,7 @@ export async function undelegate(
   if (await backOnSolana(keys)) return;
   const ix = await m
     .undelegateGame()
-    .accountsPartial({
-      payer: signer.publicKey,
-      ...rollupAccounts(keys),
-      ...permissionAccounts(keys),
-    })
+    .accountsPartial({ payer: signer.publicKey, ...rollupAccounts(keys) })
     .instruction();
   try {
     await sendTx({ conn: s.tee, ixs: [ix] }, signer);

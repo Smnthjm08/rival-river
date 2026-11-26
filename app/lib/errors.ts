@@ -11,6 +11,7 @@ const COPY: Record<string, string> = {
   ZeroStake: "Pick a stake above zero.",
   TableNotOpen: "This table isn’t waiting for an opponent any more.",
   TableNotLocked: "Both players need to stake before the match starts.",
+  StakeChanged: "The stake changed since you opened this page. Check it, then join again.",
   MatchExpired: "The match deadline has passed. Refund the table instead.",
   RefundTooEarly: "Refunds aren’t open yet.",
   NothingToRefund: "Nothing to refund here.",
