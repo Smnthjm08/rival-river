@@ -65,6 +65,8 @@ export class HandTracker {
   lastResult: HandResult | null = null;
   private endedAt = 0;
   private handStart: { handNumber: number; stacks: Pair<number> } | null = null;
+  /** Steps that just came back "not yet", and when they may be tried again. */
+  private retryAt = new Map<AutoStep, number>();
 
   constructor(readonly seat: 0 | 1, readonly pauseSeconds = 4) {}
 
@@ -101,7 +103,19 @@ export class HandTracker {
     }
     if (game.phase === "waiting" && now - this.endedAt < this.pauseSeconds)
       return [];
-    return dueSteps(game, hand, this.seat, now);
+    return dueSteps(game, hand, this.seat, now).filter(
+      (step) => (this.retryAt.get(step) ?? 0) <= now
+    );
+  }
+
+  /**
+   * A step came back BENIGN ("not yet", e.g. SecretsMissing while the
+   * opponent's secret is on its way). Hold it off for a moment: on the
+   * rollup every refused transaction still runs and is recorded, so retrying
+   * on every poll would fill the TEE with failures.
+   */
+  backOff(step: AutoStep, seconds = 2, now = Date.now() / 1000) {
+    this.retryAt.set(step, now + seconds);
   }
 }
 
@@ -116,14 +130,22 @@ const BENIGN: Record<AutoStep, string[]> = {
   claimTimeout: ["NotTimedOut", "SecretsMissing"],
 };
 
-/** Sends due steps in order. Throws only on errors that aren't BENIGN. */
-export async function runSteps(s: Seat, steps: AutoStep[]): Promise<void> {
+/**
+ * Sends due steps in order. Throws only on errors that aren't BENIGN;
+ * `onBenign` hears about those (HandTracker.backOff, to slow the retries).
+ */
+export async function runSteps(
+  s: Seat,
+  steps: AutoStep[],
+  onBenign?: (step: AutoStep) => void
+): Promise<void> {
   for (const step of steps) {
     try {
       await moves[step](s);
     } catch (e) {
       const name = programErrorName(e);
       if (!name || !BENIGN[step].includes(name)) throw e;
+      onBenign?.(step);
     }
   }
 }

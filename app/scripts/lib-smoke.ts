@@ -27,6 +27,8 @@ import {
   fetchTable,
   finishMatch,
   HandTracker,
+  inviteFragment,
+  inviteFromHash,
   joinTable,
   keypairWallet,
   moves,
@@ -175,12 +177,20 @@ async function main() {
   );
   C.prompts.length = 0;
 
-  console.log("[1] lobby: create, then join (which also starts the match)");
-  const keys = await createTable(C.wallet, O.wallet.publicKey, STAKE);
-  console.log(`  table ${keys.table.toBase58()}`);
-  console.log(
-    `  join + init_game + delegate: ${await joinTable(O.wallet, keys)}`
-  );
+  console.log("[1] lobby: an open table, joined through the invite link (which also starts the match)");
+  const created = await createTable(C.wallet, null, STAKE);
+  const link = `/table/${created.keys.creator.toBase58()}/${created.keys.tableId.toString()}#${inviteFragment(created.invite!)}`;
+  console.log(`  invite link ${link.slice(0, 60)}…`);
+  const open = (await fetchTable(base, created.keys.table))!;
+  console.log(`  table ${created.keys.table.toBase58()}, open: ${open.open}`);
+  // The friend opens the link: the invite comes from the #fragment.
+  const fromLink = inviteFromHash(link.split("#")[1]);
+  const stranger = await joinTable(O.wallet, open, null).then(() => "JOINED (bad)", (e) => programErrorName(e) ?? String(e));
+  console.log(`  joining without the link's key: ${stranger}`);
+  console.log(`  join + init_game + delegate: ${await joinTable(O.wallet, open, fromLink)}`);
+  const keys = (await fetchTable(base, created.keys.table))!.keys;
+  console.log(`  seat taken by the opponent: ${keys.opponent.equals(O.wallet.publicKey) ? "yes (good)" : "NO (bad)"}`);
+  const linkOk = stranger === "InviteRequired" && keys.opponent.equals(O.wallet.publicKey);
   await waitForRollup(keys);
 
   console.log(
@@ -260,7 +270,7 @@ async function main() {
   console.log("[5] wallet prompts");
   console.log(`  creator  (${C.prompts.length}): ${C.prompts.join(", ")}`);
   console.log(`  opponent (${O.prompts.length}): ${O.prompts.join(", ")}`);
-  if (!twoTabsOk) process.exitCode = 1;
+  if (!twoTabsOk || !linkOk) process.exitCode = 1;
   if (peek !== null || gained !== 2 * STAKE) process.exitCode = 1;
 }
 

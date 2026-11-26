@@ -81,7 +81,8 @@ export function useMatch(
           // key replaced ours): they'd only fail.
           if (due.length && !running.current && isOurs(game, seat)) {
             running.current = true;
-            runSteps(seat, due)
+            const tracker_ = tracker.current!;
+            runSteps(seat, due, (step) => tracker_.backOff(step))
               .catch((e) => console.warn("[rival] automatic step failed", e))
               .finally(() => (running.current = false));
           }

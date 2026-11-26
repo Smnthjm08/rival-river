@@ -18,6 +18,7 @@ const COPY: Record<string, string> = {
   MatchNotFinished: "The match isn’t finished yet.",
   NotAPlayer: "This wallet doesn’t play at this table.",
   WrongMint: "Stakes must be in devnet USDC.",
+  NoSignMessage: "Your wallet can’t sign messages. Play from the tab you staked in; it doesn’t need one.",
   WrongRollup: "The game landed on an unexpected rollup, so the app stopped. Please report this.",
 };
 

@@ -1,7 +1,7 @@
 //! Before the match, on Solana: open, join or cancel a table. Joining also
 //! creates the game and hands it to the private rollup.
 import { BN } from "@anchor-lang/core";
-import { ComputeBudgetProgram, PublicKey } from "@solana/web3.js";
+import { ComputeBudgetProgram, Keypair, PublicKey } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import {
   delegateBufferPdaFromDelegatedAccountAndOwnerProgram,
@@ -20,6 +20,8 @@ import { program } from "../chain/program";
 import type { WalletSigner } from "../chain/signer";
 import { sendTx, TxError } from "../chain/tx";
 import { sessionKeypair } from "../session/session-key";
+import { saveInvite } from "../session/invite";
+import type { TableView } from "../game/state";
 
 const m = program.methods;
 
@@ -30,13 +32,22 @@ const m = program.methods;
  */
 export async function createTable(
   wallet: WalletSigner,
-  opponent: PublicKey,
+  /** The only wallet that may join, or null for an open table: whoever has the invite link. */
+  opponent: PublicKey | null,
   stake: number
-): Promise<MatchKeys> {
-  const keys = matchKeys(wallet.publicKey, opponent, new BN(Date.now()));
+): Promise<{ keys: MatchKeys; invite: Keypair | null }> {
+  const keys = matchKeys(wallet.publicKey, opponent ?? PublicKey.default, new BN(Date.now()));
   const session = sessionKeypair(keys.game, wallet.publicKey);
+  // Open tables: a throwaway keypair whose seed goes in the link (see invite.ts).
+  const invite = opponent ? null : Keypair.generate();
   const ix = await m
-    .createTable(keys.tableId, opponent, new BN(stake), session.publicKey)
+    .createTable(
+      keys.tableId,
+      opponent ?? PublicKey.default,
+      new BN(stake),
+      session.publicKey,
+      invite?.publicKey ?? PublicKey.default
+    )
     .accountsPartial({
       creator: wallet.publicKey,
       table: keys.table,
@@ -46,7 +57,8 @@ export async function createTable(
     })
     .instruction();
   await sendTx({ conn: base, ixs: [ix] }, wallet);
-  return keys;
+  if (invite) saveInvite(keys.table, invite);
+  return { keys, invite };
 }
 
 const initGameIx = (payer: PublicKey, keys: MatchKeys) =>
@@ -99,12 +111,22 @@ const computeLimit = () =>
  * the game, and hand it to the private rollup, in one transaction and one
  * wallet prompt. Also names this tab's session key.
  */
-export async function joinTable(wallet: WalletSigner, keys: MatchKeys) {
+export async function joinTable(
+  wallet: WalletSigner,
+  table: Pick<TableView, "keys">,
+  /** Open tables: the invite link's keypair, which co-signs. */
+  invite: Keypair | null = null
+) {
+  // On an open table the joiner becomes the opponent, so the game's Hand
+  // addresses (seeded by the opponent) are derived from this wallet.
+  const t = table.keys;
+  const keys = matchKeys(t.creator, wallet.publicKey, t.tableId);
   const session = sessionKeypair(keys.game, wallet.publicKey);
   const join = await m
     .joinTable(session.publicKey)
     .accountsPartial({
       opponent: wallet.publicKey,
+      invite: invite?.publicKey ?? null,
       table: keys.table,
       mint: USDC_MINT,
       opponentToken: usdcOf(wallet.publicKey),
@@ -118,7 +140,7 @@ export async function joinTable(wallet: WalletSigner, keys: MatchKeys) {
     await initGameIx(wallet.publicKey, keys),
     await delegateIx(wallet.publicKey, keys),
   ];
-  return sendTx({ conn: base, ixs }, wallet);
+  return sendTx({ conn: base, ixs, signers: invite ? [invite] : [] }, wallet);
 }
 
 /** Before anyone joins, the creator takes their stake back. */

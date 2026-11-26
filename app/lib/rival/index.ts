@@ -12,6 +12,7 @@ export * from "./chain/tx";
 
 // This tab's session key
 export * from "./session/session-key";
+export * from "./session/invite";
 
 // Reading state
 export * from "./game/cards";

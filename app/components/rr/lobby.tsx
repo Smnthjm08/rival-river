@@ -15,7 +15,7 @@ import { Eyebrow } from "@/components/rr/table-pieces";
 import { formatUsdc, useUsdcBalance } from "@/hooks/use-usdc-balance";
 import { useWalletSigner } from "@/hooks/use-wallet-signer";
 import { friendlyError } from "@/lib/errors";
-import { createTable, MAX_HANDS, USDC_DECIMALS } from "@/lib/rival";
+import { createTable, inviteFragment, MAX_HANDS, USDC_DECIMALS } from "@/lib/rival";
 
 const STAKES = [1, 5, 10, 25];
 
@@ -34,11 +34,16 @@ export function Lobby() {
   const wallet = useWalletSigner();
   const balance = useUsdcBalance(wallet?.publicKey ?? null);
   const [address, setAddress] = useState("");
+  // Open by default: whoever you send the link to can join.
+  const [who, setWho] = useState<"link" | "wallet">("link");
   const [stake, setStake] = useState(5);
   const [busy, setBusy] = useState(false);
 
-  const opponent = parseAddress(address);
-  const addressError = address.trim() && !opponent
+  const named = who === "wallet";
+  const opponent = named ? parseAddress(address) : null;
+  const addressError = !named
+    ? null
+    : address.trim() && !opponent
     ? "That isn’t a Solana address."
     : opponent && wallet && opponent.equals(wallet.publicKey)
       ? "You can’t invite yourself."
@@ -46,12 +51,15 @@ export function Lobby() {
   const stakeUnits = stake * 10 ** USDC_DECIMALS;
   const shortOfUsdc = balance !== null && balance < stakeUnits;
 
+  const ready = !!wallet && (!named || (!!opponent && !addressError));
+
   async function create() {
-    if (!wallet || !opponent || addressError) return;
+    if (!wallet || !ready) return;
     setBusy(true);
     try {
-      const keys = await createTable(wallet, opponent, stakeUnits);
-      const path = tablePath(keys.creator, keys.tableId);
+      const { keys, invite } = await createTable(wallet, opponent, stakeUnits);
+      // Open tables: the invite secret rides in the #fragment, never sent to a server.
+      const path = tablePath(keys.creator, keys.tableId) + (invite ? `#${inviteFragment(invite)}` : "");
       await navigator.clipboard.writeText(`${location.origin}${path}`).catch(() => undefined);
       toast.success("Table created. Invite link copied: send it to your friend.");
       router.push(path);
@@ -84,20 +92,42 @@ export function Lobby() {
               }}
             >
               <FieldGroup className="gap-6">
-                <Field data-invalid={!!addressError || undefined}>
-                  <FieldLabel htmlFor="opponent" className="text-sm">Opponent’s wallet</FieldLabel>
-                  <Input
-                    id="opponent"
-                    value={address}
-                    onChange={(e) => setAddress(e.target.value)}
-                    placeholder="Paste a Solana address"
-                    autoComplete="off"
-                    spellCheck={false}
-                    aria-invalid={!!addressError || undefined}
-                    className="h-12 bg-ink px-4 font-mono text-[15px]"
-                  />
-                  {addressError ? <FieldError>{addressError}</FieldError> : <FieldDescription>Only this wallet can join your table.</FieldDescription>}
-                </Field>
+                <FieldSet>
+                  <FieldLegend className="text-sm">Who can join</FieldLegend>
+                  <ToggleGroup
+                    value={[who]}
+                    onValueChange={(v) => v[0] && setWho(v[0] as "link" | "wallet")}
+                    variant="stake"
+                    size="xl"
+                    spacing={2.5}
+                    className="grid w-full grid-cols-2"
+                  >
+                    <ToggleGroupItem value="link" className="font-sans">Anyone with the link</ToggleGroupItem>
+                    <ToggleGroupItem value="wallet" className="font-sans">A specific wallet</ToggleGroupItem>
+                  </ToggleGroup>
+                  {!named && (
+                    <FieldDescription>
+                      Whoever you send the invite link to can take the seat: the first to match your stake plays you.
+                    </FieldDescription>
+                  )}
+                </FieldSet>
+
+                {named && (
+                  <Field data-invalid={!!addressError || undefined}>
+                    <FieldLabel htmlFor="opponent" className="text-sm">Opponent’s wallet</FieldLabel>
+                    <Input
+                      id="opponent"
+                      value={address}
+                      onChange={(e) => setAddress(e.target.value)}
+                      placeholder="Paste a Solana address"
+                      autoComplete="off"
+                      spellCheck={false}
+                      aria-invalid={!!addressError || undefined}
+                      className="h-12 bg-ink px-4 font-mono text-[15px]"
+                    />
+                    {addressError ? <FieldError>{addressError}</FieldError> : <FieldDescription>Only this wallet can join your table.</FieldDescription>}
+                  </Field>
+                )}
 
                 <FieldSet>
                   <FieldLegend className="text-sm">Stake per player</FieldLegend>
@@ -134,7 +164,7 @@ export function Lobby() {
                   </FieldDescription>
                 </FieldSet>
 
-                <Button type="submit" size="2xl" disabled={!wallet || !opponent || !!addressError || shortOfUsdc || busy}>
+                <Button type="submit" size="2xl" disabled={!ready || shortOfUsdc || busy}>
                   {busy && <Spinner data-icon="inline-start" />}
                   {!wallet ? "Connect a wallet to create a table" : busy ? "Confirm in your wallet" : "Create table and copy invite link"}
                 </Button>
@@ -156,7 +186,7 @@ export function Lobby() {
               {[
                 "You create the table and stake.",
                 "Your friend opens the invite link and matches the stake.",
-                "You start the match: the game moves to MagicBlock’s private rollup.",
+                "Their one approval starts the match on MagicBlock’s private rollup.",
                 `Play up to ${MAX_HANDS} hands. Blinds rise every hand, so it always ends.`,
                 "The winner collects both stakes on Solana.",
               ].map((step, i) => (

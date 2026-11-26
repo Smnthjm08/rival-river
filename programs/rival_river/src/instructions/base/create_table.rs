@@ -52,6 +52,10 @@ pub struct CreateTable<'info> {
 /// Opens a table and puts the creator's stake in the vault. The invited
 /// opponent matches it with join_table. Until then, cancel_table refunds it.
 ///
+/// `opponent`: the only wallet that can join, or Pubkey::default() for an
+/// open table that whoever holds the invite link can join; then
+/// `invite_key` (the public half of the link's keypair) is required.
+///
 /// `session_key` (or Pubkey::default() for none) will sign the creator's
 /// moves on the rollup. The creator also pre-pays the game accounts' rent
 /// into the Table: whoever runs init_game is paid back from it, so the
@@ -62,12 +66,15 @@ pub fn create_table_handler(
     opponent: Pubkey,
     stake: u64,
     session_key: Pubkey,
+    invite_key: Pubkey,
 ) -> Result<()> {
     let a = &ctx.accounts;
+    let none = Pubkey::default();
     require_keys_neq!(opponent, a.creator.key(), ErrorCode::OpponentIsCreator);
     require!(stake > 0, ErrorCode::ZeroStake);
+    require!(opponent != none || invite_key != none, ErrorCode::NoWayToJoin);
     // The other seat's wallet can't also sign for this one.
-    require_keys_neq!(session_key, opponent, ErrorCode::SessionKeyTaken);
+    require!(opponent == none || session_key != opponent, ErrorCode::SessionKeyTaken);
 
     escrow::deposit(
         &a.creator,
@@ -87,6 +94,7 @@ pub fn create_table_handler(
         status: TableStatus::WaitingForOpponent,
         deadline: 0,
         session_keys: [session_key, Pubkey::default()],
+        invite_key,
         bump: ctx.bumps.table,
     });
 

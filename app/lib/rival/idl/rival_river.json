@@ -682,6 +682,10 @@
         {
           "name": "session_key",
           "type": "pubkey"
+        },
+        {
+          "name": "invite_key",
+          "type": "pubkey"
         }
       ]
     },
@@ -1883,16 +1887,21 @@
       "accounts": [
         {
           "name": "opponent",
+          "docs": [
+            "The named opponent, or on an open table whoever holds the invite link."
+          ],
+          "signer": true
+        },
+        {
+          "name": "invite",
+          "docs": [
+            "Open tables only: the invite link's keypair, co-signing the join."
+          ],
           "signer": true,
-          "relations": [
-            "table"
-          ]
+          "optional": true
         },
         {
           "name": "table",
-          "docs": [
-            "`has_one = opponent`: only the invited player can join."
-          ],
           "writable": true
         },
         {
@@ -3448,6 +3457,16 @@
       "code": 6032,
       "name": "SessionKeyTaken",
       "msg": "That key already plays in this game"
+    },
+    {
+      "code": 6033,
+      "name": "NoWayToJoin",
+      "msg": "Name an opponent, or open the table with an invite key"
+    },
+    {
+      "code": 6034,
+      "name": "InviteRequired",
+      "msg": "Joining this table needs its invite link"
     }
   ],
   "types": [
@@ -3836,6 +3855,10 @@
           },
           {
             "name": "opponent",
+            "docs": [
+              "The invited wallet. Pubkey::default() on an open table until someone",
+              "joins with the invite link; join_table then records them here."
+            ],
             "type": "pubkey"
           },
           {
@@ -3882,6 +3905,16 @@
                 2
               ]
             }
+          },
+          {
+            "name": "invite_key",
+            "docs": [
+              "Open tables: the public half of a throwaway keypair whose secret is",
+              "only in the invite link. join_table needs its signature, so whoever",
+              "has the link can join, but nobody can reuse a join they saw on chain.",
+              "Pubkey::default() when the table is for a named opponent only."
+            ],
+            "type": "pubkey"
           },
           {
             "name": "bump",

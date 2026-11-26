@@ -351,7 +351,8 @@ async function main() {
             tableId,
             opponent.publicKey,
             new BN(STAKE),
-            PublicKey.default
+            PublicKey.default,
+            PublicKey.default // named opponent, no invite link
           ) // no stake-time session key: tests the wallet path
           .accountsPartial({
             creator: creator.publicKey,
@@ -374,6 +375,7 @@ async function main() {
         await program.methods
           .joinTable(PublicKey.default)
           .accountsPartial({
+            invite: null,
             opponent: opponent.publicKey,
             table,
             mint: USDC,

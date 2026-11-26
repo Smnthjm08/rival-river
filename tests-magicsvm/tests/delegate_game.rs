@@ -93,6 +93,12 @@ fn setup() -> Setup {
 /// setup(), with each player naming a session key when they stake
 /// ([creator's, opponent's]), as the app does.
 fn setup_with(sessions: [Pubkey; 2]) -> Setup {
+    setup_full(sessions, false)
+}
+
+/// With `open`: the creator names no opponent, only an invite key, and the
+/// opponent joins by co-signing with it (the invite link's keypair).
+fn setup_full(sessions: [Pubkey; 2], open: bool) -> Setup {
     let mut svm = MagicSVM::new();
     svm.add_program_from_file(addr(rival_river::id()), SO).unwrap();
     let creator = Keypair::new();
@@ -110,8 +116,15 @@ fn setup_with(sessions: [Pubkey; 2]) -> Setup {
         fund(&mut svm, key(k), mint, STAKE);
     }
     let vault = ata(table, mint);
+    let invite = Keypair::new();
     assert!(send(&mut svm, Base, &creator, ix(
-        instruction::CreateTable { table_id: 1, opponent: key(&opponent), stake: STAKE, session_key: sessions[0] },
+        instruction::CreateTable {
+            table_id: 1,
+            opponent: if open { Pubkey::default() } else { key(&opponent) },
+            stake: STAKE,
+            session_key: sessions[0],
+            invite_key: if open { key(&invite) } else { Pubkey::default() },
+        },
         accounts::CreateTable {
             creator: key(&creator),
             table,
@@ -123,17 +136,22 @@ fn setup_with(sessions: [Pubkey; 2]) -> Setup {
             system_program: system_program::ID,
         },
     )));
-    assert!(send(&mut svm, Base, &opponent, ix(
+    let join = ix(
         instruction::JoinTable { session_key: sessions[1] },
         accounts::JoinTable {
             opponent: key(&opponent),
+            invite: open.then(|| key(&invite)),
             table,
             mint,
             opponent_token: ata(key(&opponent), mint),
             vault,
             token_program: token_program(),
         },
-    )));
+    );
+    let signers: Vec<&Keypair> = if open { vec![&opponent, &invite] } else { vec![&opponent] };
+    let tx = Transaction::new(&signers, Message::new(&[join], Some(&opponent.pubkey())), svm.latest_blockhash_for(Base));
+    assert!(svm.send_transaction_to(Base, tx).is_ok(), "join_table");
+    svm.expire_blockhash_for(Base);
     Setup { svm, creator, opponent, table, game, deck, hand_creator, hand_opponent, mint }
 }
 
@@ -2020,4 +2038,23 @@ fn stranger_session_cannot_make_permissions_or_undelegate() {
     assert!(!init_permissions(&mut s, &stranger));
     force_finish(&mut s);
     assert!(!undelegate_game(&mut s, &stranger));
+}
+
+// ---- Open tables (invite link) -----------------------------------------------
+
+#[test]
+fn an_open_table_joined_by_link_plays_on_the_rollup() {
+    let sessions = [Keypair::new(), Keypair::new()];
+    let mut s = setup_full([key(&sessions[0]), key(&sessions[1])], true);
+    let opponent = s.opponent.insecure_clone();
+    // As the app does: the joiner opens and delegates the game.
+    init_game_by(&mut s, &opponent);
+    assert!(delegate_game(&mut s, &opponent));
+    assert!(init_permissions(&mut s, &sessions[0]));
+    // The joiner's Hand is theirs alone.
+    assert_eq!(readers(&s.svm, s.hand_opponent), (true, vec![key(&opponent), key(&sessions[1])], false));
+
+    assert!(start_hand(&mut s, &sessions[0]));
+    shuffle_and_deal(&mut s);
+    assert!(read_hand(&s.svm, Ephemeral, s.hand_opponent).dealt, "the joiner was dealt in");
 }

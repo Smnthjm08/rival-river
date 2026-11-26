@@ -7,6 +7,8 @@ use anchor_lang::prelude::*;
 pub struct Table {
     pub table_id: u64,
     pub creator: Pubkey,
+    /// The invited wallet. Pubkey::default() on an open table until someone
+    /// joins with the invite link; join_table then records them here.
     pub opponent: Pubkey,
     /// The token both players stake (USDC in the app).
     pub mint: Pubkey,
@@ -21,6 +23,11 @@ pub struct Table {
     /// (Pubkey::default() = none). init_game copies them into the Game, so
     /// the browser tab that staked can play without another wallet prompt.
     pub session_keys: [Pubkey; 2],
+    /// Open tables: the public half of a throwaway keypair whose secret is
+    /// only in the invite link. join_table needs its signature, so whoever
+    /// has the link can join, but nobody can reuse a join they saw on chain.
+    /// Pubkey::default() when the table is for a named opponent only.
+    pub invite_key: Pubkey,
     pub bump: u8,
 }
 

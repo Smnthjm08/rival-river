@@ -69,6 +69,10 @@ fn create_table(s: &mut Setup, table_id: u64, opponent: Pubkey, stake: u64) -> b
 }
 
 fn create_table_with(s: &mut Setup, table_id: u64, opponent: Pubkey, stake: u64, session_key: Pubkey) -> bool {
+    create_table_full(s, table_id, opponent, stake, session_key, Pubkey::default())
+}
+
+fn create_table_full(s: &mut Setup, table_id: u64, opponent: Pubkey, stake: u64, session_key: Pubkey, invite_key: Pubkey) -> bool {
     let creator = s.creator.pubkey();
     let table = table_pda(&creator, table_id);
     let ix = Instruction::new_with_bytes(
@@ -78,6 +82,7 @@ fn create_table_with(s: &mut Setup, table_id: u64, opponent: Pubkey, stake: u64,
             opponent,
             stake,
             session_key,
+            invite_key,
         }
         .data(),
         rival_river::accounts::CreateTable {
@@ -101,11 +106,17 @@ fn join_table(s: &mut Setup, signer: &Keypair, table: Pubkey) -> bool {
 }
 
 fn join_table_with(s: &mut Setup, signer: &Keypair, table: Pubkey, session_key: Pubkey) -> bool {
+    join_table_full(s, signer, table, session_key, None)
+}
+
+/// With `invite`: the invite link's keypair co-signs, as on an open table.
+fn join_table_full(s: &mut Setup, signer: &Keypair, table: Pubkey, session_key: Pubkey, invite: Option<&Keypair>) -> bool {
     let ix = Instruction::new_with_bytes(
         rival_river::id(),
         &rival_river::instruction::JoinTable { session_key }.data(),
         rival_river::accounts::JoinTable {
             opponent: signer.pubkey(),
+            invite: invite.map(|k| k.pubkey()),
             table,
             mint: s.mint,
             opponent_token: get_associated_token_address(&signer.pubkey(), &s.mint),
@@ -114,7 +125,13 @@ fn join_table_with(s: &mut Setup, signer: &Keypair, table: Pubkey, session_key: 
         }
         .to_account_metas(None),
     );
-    send(&mut s.svm, signer, ix)
+    let mut signers = vec![signer];
+    signers.extend(invite);
+    let msg = Message::new_with_blockhash(&[ix], Some(&signer.pubkey()), &s.svm.latest_blockhash());
+    let tx = VersionedTransaction::try_new(VersionedMessage::Legacy(msg), &signers).unwrap();
+    let ok = s.svm.send_transaction(tx).is_ok();
+    s.svm.expire_blockhash();
+    ok
 }
 
 fn cancel_table(s: &mut Setup, signer: &Keypair, table: Pubkey) -> bool {
@@ -342,4 +359,66 @@ fn session_keys_are_named_when_staking() {
     assert!(!join_table_with(&mut s, &opponent, table, creator.pubkey()));
     assert!(join_table_with(&mut s, &opponent, table, theirs));
     assert_eq!(read_table(&s.svm, table).session_keys, [mine, theirs]);
+}
+
+// ---- Open tables: whoever has the invite link ----------------------------------
+
+#[test]
+fn a_table_needs_an_opponent_or_an_invite_key() {
+    let mut s = setup();
+    assert!(!create_table_full(&mut s, 1, Pubkey::default(), STAKE, Pubkey::default(), Pubkey::default()));
+}
+
+#[test]
+fn whoever_has_the_link_joins_an_open_table() {
+    let mut s = setup();
+    let (creator, friend) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    let invite = Keypair::new();
+    assert!(create_table_full(&mut s, 1, Pubkey::default(), STAKE, Pubkey::default(), invite.pubkey()));
+    let table = table_pda(&creator.pubkey(), 1);
+    assert_eq!(read_table(&s.svm, table).opponent, Pubkey::default());
+
+    let session = Pubkey::new_unique();
+    assert!(join_table_full(&mut s, &friend, table, session, Some(&invite)));
+    let t = read_table(&s.svm, table);
+    assert_eq!((t.opponent, t.status, t.session_keys[1]), (friend.pubkey(), TableStatus::Locked, session));
+    assert_eq!(balance(&s.svm, get_associated_token_address(&table, &s.mint)), 2 * STAKE);
+}
+
+#[test]
+fn an_open_table_refuses_joins_without_the_link() {
+    let mut s = setup();
+    let (creator, friend) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    let invite = Keypair::new();
+    assert!(create_table_full(&mut s, 1, Pubkey::default(), STAKE, Pubkey::default(), invite.pubkey()));
+    let table = table_pda(&creator.pubkey(), 1);
+    assert!(!join_table_full(&mut s, &friend, table, Pubkey::default(), None), "no invite signature");
+    assert!(!join_table_full(&mut s, &friend, table, Pubkey::default(), Some(&Keypair::new())), "wrong invite key");
+    assert_eq!(read_table(&s.svm, table).status, TableStatus::WaitingForOpponent);
+}
+
+#[test]
+fn the_creator_cannot_take_the_other_seat_of_an_open_table() {
+    let mut s = setup();
+    let creator = s.creator.insecure_clone();
+    let (invite, session) = (Keypair::new(), Keypair::new());
+    fund(&mut s.svm, session.pubkey(), s.mint, STAKE);
+    s.svm.airdrop(&session.pubkey(), 1_000_000_000).unwrap();
+    assert!(create_table_full(&mut s, 1, Pubkey::default(), STAKE, session.pubkey(), invite.pubkey()));
+    let table = table_pda(&creator.pubkey(), 1);
+    assert!(!join_table_full(&mut s, &creator, table, Pubkey::default(), Some(&invite)), "creator's wallet");
+    assert!(!join_table_full(&mut s, &session, table, Pubkey::default(), Some(&invite)), "creator's session key");
+}
+
+#[test]
+fn a_named_table_still_takes_only_that_wallet() {
+    let mut s = setup();
+    let (creator, friend) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    let stranger = Keypair::new();
+    s.svm.airdrop(&stranger.pubkey(), 1_000_000_000).unwrap();
+    fund(&mut s.svm, stranger.pubkey(), s.mint, STAKE);
+    assert!(create_table(&mut s, 1, friend.pubkey(), STAKE));
+    let table = table_pda(&creator.pubkey(), 1);
+    assert!(!join_table_full(&mut s, &stranger, table, Pubkey::default(), Some(&Keypair::new())));
+    assert!(join_table(&mut s, &friend, table));
 }

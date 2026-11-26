@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { BN } from "@anchor-lang/core";
-import { PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey } from "@solana/web3.js";
 import { CopyIcon, LockIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -36,6 +36,9 @@ import {
   enterRollup,
   finishMatch,
   hasTeeLogin,
+  inviteFragment,
+  inviteFromHash,
+  savedInvite,
   joinTable,
   matchKeys,
   MAX_HANDS,
@@ -124,6 +127,7 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
   );
 
   const me = table && wallet ? seatOf(table.keys, wallet.publicKey) : null;
+  const [linkInvite] = useState(() => (typeof location === "undefined" ? null : inviteFromHash(location.hash)));
   // A seat belongs to the wallet that took it; switching wallets drops it.
   const activeSeat = seat && wallet && me === seat.seat ? seat : null;
 
@@ -131,11 +135,15 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
     if (!table) return null;
     const chars = charactersFor(table.keys.creator, table.keys.opponent);
     const wallets = [table.keys.creator, table.keys.opponent];
-    return [0, 1].map((i) => ({
-      character: chars[i],
-      name: me === i ? "You" : CHARACTER_NAMES[chars[i]],
-      address: shortKey(wallets[i]),
-    })) as [SeatInfo, SeatInfo];
+    return [0, 1].map((i) =>
+      i === 1 && table.open
+        ? { character: chars[1], name: "Open seat" }
+        : {
+            character: chars[i],
+            name: me === i ? "You" : CHARACTER_NAMES[chars[i]],
+            address: shortKey(wallets[i]),
+          }
+    ) as [SeatInfo, SeatInfo];
   }, [table, me]);
 
   const run = useCallback(
@@ -284,12 +292,19 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
 
   const keys = table.keys;
   const [creator, opponent] = seats!;
-  const inviteUrl = typeof location === "undefined" ? "" : location.href;
+  // Open tables: the link must carry the invite secret. The creator's copy is
+  // in the URL they landed on, or saved when they created the table.
+  const creatorInvite = table.open ? (linkInvite ?? savedInvite(table.keys.table)) : null;
+  const inviteUrl =
+    typeof location === "undefined"
+      ? ""
+      : `${location.origin}${location.pathname}${creatorInvite ? `#${inviteFragment(creatorInvite)}` : ""}`;
+  const linkOk = !!linkInvite && !!table.inviteKey && linkInvite.publicKey.equals(table.inviteKey);
 
   const steps = (now: number): { label: string; state: StepState }[] =>
     [
       `${creator.name === "You" ? "You" : creator.name} opened the table and deposited`,
-      `${opponent.name === "You" ? "You deposit" : `${opponent.name} deposits`}, and the match starts`,
+      `${opponent.name === "You" ? "You deposit" : table.open ? "Your friend deposits" : `${opponent.name} deposits`}, and the match starts`,
       `Up to ${MAX_HANDS} hands on MagicBlock’s private rollup`,
       `Winner collects ${formatUsdc(table.stake * 2)} USDC`,
     ].map((label, i) => ({ label, state: i < now ? "done" : i === now ? "now" : "later" }));
@@ -310,10 +325,25 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
     if (me === 0) {
       return layout(
         <>
-          <Heading eyebrow="Table open" title={`Waiting for ${opponent.name}`}>
-            Send this link to your friend. Only the wallet <Mono>{opponent.address}</Mono> can join. When they match your stake the match
-            starts by itself, so keep this tab open.
-          </Heading>
+          {table.open ? (
+            <Heading eyebrow="Table open" title="Send the invite link">
+              Whoever you send this link to can take the seat: the first wallet to match your stake plays you. The match starts by
+              itself, so keep this tab open.
+            </Heading>
+          ) : (
+            <Heading eyebrow="Table open" title={`Waiting for ${opponent.name}`}>
+              Send this link to your friend. Only the wallet <Mono>{opponent.address}</Mono> can join. When they match your stake the
+              match starts by itself, so keep this tab open.
+            </Heading>
+          )}
+          {table.open && !creatorInvite && (
+            <Alert variant="error">
+              <AlertTitle>This browser doesn’t have the invite link</AlertTitle>
+              <AlertDescription>
+                It was created in another browser. Copy the link from there, or cancel and create a new table.
+              </AlertDescription>
+            </Alert>
+          )}
           <div className="flex flex-col gap-3 rounded-2xl bg-card p-4">
             <Eyebrow>Invite link</Eyebrow>
             <div className="flex flex-wrap gap-2.5">
@@ -331,7 +361,7 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
             </div>
             <span role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
               <span aria-hidden="true" className="size-2 animate-pulse rounded-full bg-river" />
-              {opponent.name} hasn’t joined yet
+              {table.open ? "Nobody has joined yet" : `${opponent.name} hasn’t joined yet`}
             </span>
           </div>
           <Button variant="outline" size="xl" className="w-fit" disabled={!!busy} onClick={() => void run("Cancelling…", () => cancelTable(wallet!, keys))}>
@@ -341,8 +371,34 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
         1,
       );
     }
+    const join = (invite: Keypair | null) => () => void run("Confirm in your wallet…", () => joinTable(wallet!, table, invite));
     if (me === 1) {
-      return layout(<JoinPanel table={table} creator={creator} busy={busy} onJoin={() => void run("Confirm in your wallet…", () => joinTable(wallet!, keys))} />, 1);
+      return layout(<JoinPanel table={table} creator={creator} busy={busy} onJoin={join(null)} />, 1);
+    }
+    if (table.open) {
+      if (!linkOk) {
+        return layout(
+          <Heading eyebrow="Invite link" title="This link is missing its invite code">
+            Ask your friend to send the whole link: the part after <Mono>#</Mono> is the key that lets you join.
+          </Heading>,
+          1,
+        );
+      }
+      if (!connected) {
+        return layout(
+          <>
+            <Heading eyebrow="You’re invited" title={`${creator.name} challenges you`}>
+              <Mono>{creator.address}</Mono> opened a heads-up match for <Mono>{formatUsdc(table.stake)} USDC</Mono> a side. Connect a
+              wallet to take the seat.
+            </Heading>
+            <div className="w-fit">
+              <WalletButton />
+            </div>
+          </>,
+          1,
+        );
+      }
+      return layout(<JoinPanel table={table} creator={creator} busy={busy} onJoin={join(linkInvite)} />, 1);
     }
     return layout(<WrongWallet invited={opponent.address!} creatorName={creator.name} connected={connected} />, 1);
   }

@@ -68,4 +68,8 @@ pub enum ErrorCode {
     NotRefunded,
     #[msg("That key already plays in this game")]
     SessionKeyTaken,
+    #[msg("Name an opponent, or open the table with an invite key")]
+    NoWayToJoin,
+    #[msg("Joining this table needs its invite link")]
+    InviteRequired,
 }

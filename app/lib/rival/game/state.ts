@@ -28,6 +28,10 @@ export interface TableView {
   deadline: number;
   /** Session keys named when staking, [creator, opponent]; null = none (yet). */
   sessionKeys: Pair<PublicKey | null>;
+  /** Waiting for whoever has the invite link (no opponent named, nobody joined yet). */
+  open: boolean;
+  /** The invite link's public key, for open tables; null if the table is for a named wallet. */
+  inviteKey: PublicKey | null;
 }
 
 /** Game, in plain JS types. Every pair is [creator, opponent]. */
@@ -92,6 +96,8 @@ export async function fetchTable(
     status: variant<TableStatus>(t.status),
     deadline: num(t.deadline),
     sessionKeys: orNone(t.sessionKeys as PublicKey[]),
+    open: (t.opponent as PublicKey).equals(PublicKey.default),
+    inviteKey: (t.inviteKey as PublicKey).equals(PublicKey.default) ? null : (t.inviteKey as PublicKey),
   };
 }
 

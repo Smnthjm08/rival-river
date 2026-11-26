@@ -3,19 +3,20 @@
 import { useMemo } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import type { Transaction } from "@solana/web3.js";
-import type { WalletSigner } from "@/lib/rival";
+import { TxError, type WalletSigner } from "@/lib/rival";
 
 /**
  * The connected wallet as the library's WalletSigner, or null when no
- * wallet is connected or it can't sign messages (the TEE login needs that).
- * Wallets without signAllTransactions fall back to one prompt per
- * transaction.
+ * wallet is connected. Wallets without signAllTransactions fall back to one
+ * prompt per transaction. Wallets that can't sign messages (some hardware
+ * wallets) still play: only signing in from a tab that lost its session key
+ * needs a message, and that path explains itself if it's missing.
  */
 export function useWalletSigner(): WalletSigner | null {
   const { publicKey, signTransaction, signAllTransactions, signMessage } =
     useWallet();
   return useMemo(() => {
-    if (!publicKey || !signTransaction || !signMessage) return null;
+    if (!publicKey || !signTransaction) return null;
     return {
       publicKey,
       signTransaction: <T extends Transaction>(tx: T) => signTransaction(tx),
@@ -26,7 +27,14 @@ export function useWalletSigner(): WalletSigner | null {
             for (const tx of txs) signed.push(await signTransaction(tx));
             return signed;
           },
-      signMessage,
+      signMessage:
+        signMessage ??
+        (async () => {
+          throw new TxError(
+            "This wallet can't sign messages, which signing in from a new tab needs",
+            "NoSignMessage"
+          );
+        }),
     };
   }, [publicKey, signTransaction, signAllTransactions, signMessage]);
 }

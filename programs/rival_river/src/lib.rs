@@ -28,8 +28,9 @@ pub mod rival_river {
         opponent: Pubkey,
         stake: u64,
         session_key: Pubkey,
+        invite_key: Pubkey,
     ) -> Result<()> {
-        create_table::create_table_handler(ctx, table_id, opponent, stake, session_key)
+        create_table::create_table_handler(ctx, table_id, opponent, stake, session_key, invite_key)
     }
 
     pub fn join_table(ctx: Context<JoinTable>, session_key: Pubkey) -> Result<()> {

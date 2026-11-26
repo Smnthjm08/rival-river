@@ -66,6 +66,7 @@ fn create_table(svm: &mut LiteSVM, creator: &Keypair, join: bool) -> (Pubkey, Ke
             opponent: opponent.pubkey(),
             stake: STAKE,
             session_key: session_keys()[0],
+            invite_key: Pubkey::default(),
         }
         .data(),
         rival_river::accounts::CreateTable {
@@ -87,6 +88,7 @@ fn create_table(svm: &mut LiteSVM, creator: &Keypair, join: bool) -> (Pubkey, Ke
             &rival_river::instruction::JoinTable { session_key: session_keys()[1] }.data(),
             rival_river::accounts::JoinTable {
                 opponent: opponent.pubkey(),
+                invite: None,
                 table,
                 mint,
                 opponent_token,

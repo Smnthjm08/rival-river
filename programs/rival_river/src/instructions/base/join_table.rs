@@ -8,12 +8,14 @@ use crate::state::{Table, TableStatus};
 
 #[derive(Accounts)]
 pub struct JoinTable<'info> {
+    /// The named opponent, or on an open table whoever holds the invite link.
     pub opponent: Signer<'info>,
 
-    /// `has_one = opponent`: only the invited player can join.
+    /// Open tables only: the invite link's keypair, co-signing the join.
+    pub invite: Option<Signer<'info>>,
+
     #[account(
         mut,
-        has_one = opponent @ ErrorCode::NotAPlayer,
         has_one = mint,
         constraint = table.status == TableStatus::WaitingForOpponent @ ErrorCode::TableNotOpen,
     )]
@@ -41,6 +43,19 @@ pub struct JoinTable<'info> {
 /// moves on the rollup.
 pub fn join_table_handler(ctx: Context<JoinTable>, session_key: Pubkey) -> Result<()> {
     let a = &ctx.accounts;
+    let none = Pubkey::default();
+    let joiner = a.opponent.key();
+    if a.table.opponent != none {
+        // A table for a named wallet: only that wallet.
+        require_keys_eq!(joiner, a.table.opponent, ErrorCode::NotAPlayer);
+    } else {
+        // An open table: the invite link's key must co-sign.
+        let invited = a.invite.as_ref().is_some_and(|k| k.key() == a.table.invite_key);
+        require!(a.table.invite_key != none && invited, ErrorCode::InviteRequired);
+        require_keys_neq!(joiner, a.table.creator, ErrorCode::OpponentIsCreator);
+        // The creator's session key can't take the other seat.
+        require!(joiner != a.table.session_keys[0], ErrorCode::SessionKeyTaken);
+    }
     // A key that already signs for the creator's seat would make it
     // ambiguous whose move a signature is.
     let creator_session = a.table.session_keys[0];
@@ -61,5 +76,6 @@ pub fn join_table_handler(ctx: Context<JoinTable>, session_key: Pubkey) -> Resul
     table.status = TableStatus::Locked;
     table.deadline = Clock::get()?.unix_timestamp + START_SECONDS;
     table.session_keys[1] = session_key;
+    table.opponent = joiner;
     Ok(())
 }
