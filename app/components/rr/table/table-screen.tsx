@@ -6,23 +6,20 @@ import { useParams } from "next/navigation";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { BN } from "@anchor-lang/core";
 import { Keypair, PublicKey } from "@solana/web3.js";
-import { CopyIcon, LockIcon } from "lucide-react";
+import { CopyIcon, HourglassIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { SiteHeader } from "@/components/rr/site-header";
-import { PlayingCard } from "@/components/rr/playing-card";
 import { CHARACTER_NAMES, charactersFor } from "@/components/rr/seat-avatar";
-import { Eyebrow, useSecondsLeft } from "@/components/rr/table-pieces";
+import { MatchStatus, PrivateStatus, useSecondsLeft } from "@/components/rr/table-pieces";
 import { type SeatInfo } from "@/components/rr/table/felt";
 import { LiveTable } from "@/components/rr/table/live-table";
-import { explorer } from "@/components/rr/table/match-sidebar";
+import { CardGroup, explorer } from "@/components/rr/table/match-sidebar";
 import { StakesReview, type StepState } from "@/components/rr/table/stakes-review";
+import { TableSkeleton } from "@/components/rr/table/table-stage";
 import { WalletButton } from "@/components/rr/wallet-button";
 import { useTable } from "@/hooks/use-table";
 import { formatUsdc, useUsdcBalance } from "@/hooks/use-usdc-balance";
@@ -30,7 +27,6 @@ import { shortKey, useWalletSigner } from "@/hooks/use-wallet-signer";
 import { friendlyError } from "@/lib/errors";
 import {
   base,
-  blindsFor,
   canSitSilently,
   cancelTable,
   clearTeeLogin,
@@ -51,11 +47,11 @@ import {
   seatOf,
   startMatch,
   waitForRollup,
-  type Card as GameCard,
   type GameView,
   type Seat,
   type TableView,
 } from "@/lib/rival";
+import { cn } from "@/lib/utils";
 
 function parseRoute(p: { creator?: string; tableId?: string }) {
   try {
@@ -83,11 +79,12 @@ export function TableScreen() {
   return <TableFlow tablePda={route.table} />;
 }
 
-function Shell({ children, pills }: { children: React.ReactNode; pills?: React.ReactNode }) {
+/** `table`: the felt screen, which runs closer to the edges and fills the height. */
+function Shell({ children, pills, table }: { children: React.ReactNode; pills?: React.ReactNode; table?: boolean }) {
   return (
     <>
-      <SiteHeader>{pills}</SiteHeader>
-      <main className="mx-auto w-full max-w-360 px-4 py-6 sm:px-8 sm:pb-10">{children}</main>
+      <SiteHeader quiet>{pills}</SiteHeader>
+      <main className={cn("mx-auto w-full max-w-360", table ? "px-2 sm:px-4" : "px-4 py-6 sm:px-8 sm:py-10")}>{children}</main>
     </>
   );
 }
@@ -100,24 +97,18 @@ function FinalHand({ game, viewer }: { game: GameView; viewer: PublicKey | null 
   // Named from the game itself: the table may already be closed.
   const chars = charactersFor(...game.players);
   const name = (i: 0 | 1) => (viewer?.equals(game.players[i]) ? "You" : CHARACTER_NAMES[chars[i]]);
-  const rows: [string, GameCard[]][] = game.shown
-    ? [
-        ["Board", game.board],
-        [name(0), game.shown[0]],
-        [name(1), game.shown[1]],
-      ]
-    : [];
   return (
     <div className="flex flex-col gap-3">
-      <Eyebrow>Final hand · hand {game.handNumber}</Eyebrow>
-      {rows.map(([label, cards], i) => (
-        <div key={i} className="flex flex-wrap items-center gap-2">
-          <span className="w-24 text-sm text-muted-foreground">{label}</span>
-          {cards.map((c) => (
-            <PlayingCard key={c.id} card={c} width={44} />
-          ))}
-        </div>
-      ))}
+      <h2 className="font-heading text-base font-bold">Final hand, hand {game.handNumber}</h2>
+      {game.shown && (
+        <>
+          <CardGroup label="Board" cards={game.board} />
+          <div className="flex flex-wrap gap-x-8 gap-y-3">
+            <CardGroup label={name(0)} cards={game.shown[0]} />
+            <CardGroup label={name(1)} cards={game.shown[1]} />
+          </div>
+        </>
+      )}
       {!game.shown && <span className="text-sm text-muted-foreground">It ended with a fold, so no cards were shown.</span>}
     </div>
   );
@@ -135,19 +126,19 @@ function Notice({
   children?: React.ReactNode;
 }) {
   return (
-    <Card size="lg" className="mx-auto mt-10 max-w-xl">
-      <CardHeader>
-        <CardTitle className="font-heading text-3xl font-extrabold tracking-tight">{title}</CardTitle>
-        <CardDescription className="text-base/relaxed">{description}</CardDescription>
-      </CardHeader>
-      {detail && <CardContent>{detail}</CardContent>}
-      <CardFooter className="flex flex-wrap gap-3">
+    <div className="mx-auto flex max-w-xl flex-col gap-5 rounded-3xl bg-card p-5 sm:mt-8 sm:p-8">
+      <div className="flex flex-col gap-3">
+        <h1 className="font-heading text-3xl font-extrabold tracking-tight">{title}</h1>
+        <p className="text-base/relaxed text-muted-foreground">{description}</p>
+      </div>
+      {detail && <div className="border-t pt-5">{detail}</div>}
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
         {children}
         <Button variant="outline" size="xl" nativeButton={false} render={<Link href="/" />}>
           Back to the lobby
         </Button>
-      </CardFooter>
-    </Card>
+      </div>
+    </div>
   );
 }
 
@@ -287,7 +278,7 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
       await closeRefunded(wallet, table.keys);
     });
   }, [wallet, table, activeSeat, run]);
-  const turnPill = useTurnPill(liveGame, activeSeat?.seat ?? null, seats);
+  useTurnTitle(liveGame, activeSeat?.seat ?? null, seats);
 
   // The finished game, from Solana or as this tab last saw it on the rollup.
   // It outlives the table, which settle closes.
@@ -297,11 +288,8 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
   // ---- Loading and closed tables ----------------------------------------------
   if (table === undefined) {
     return (
-      <Shell>
-        <div className="flex flex-col gap-4">
-          <Skeleton className="h-12 w-72" />
-          <Skeleton className="aspect-16/10 w-full rounded-[2.5rem] md:rounded-[50%]" />
-        </div>
+      <Shell table>
+        <TableSkeleton />
       </Shell>
     );
   }
@@ -362,9 +350,9 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
 
   const layout = (left: React.ReactNode, now: number, pills?: React.ReactNode) => (
     <Shell pills={pills}>
-      <div className="mx-auto flex max-w-6xl flex-wrap gap-10 py-6">
-        <section className="flex min-w-0 flex-[1_1_420px] flex-col gap-6">{left}</section>
-        <section className="flex min-w-0 flex-[1_1_420px] flex-col">
+      <div className="mx-auto grid max-w-xl gap-8 lg:max-w-5xl lg:grid-cols-[minmax(0,1fr)_minmax(0,25rem)] lg:items-start lg:gap-16 lg:py-4">
+        <section className="flex min-w-0 flex-col gap-6">{left}</section>
+        <section className="min-w-0">
           <StakesReview seats={seats!} stake={table.stake} opponentDeposited={now > 1} steps={steps(now)} />
         </section>
       </div>
@@ -377,12 +365,12 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
       return layout(
         <>
           {table.open ? (
-            <Heading eyebrow="Table open" title="Send the invite link">
+            <Heading title="Send the invite link">
               Whoever you send this link to can take the seat: the first wallet to match your stake plays you. The match starts by
               itself, so keep this tab open.
             </Heading>
           ) : (
-            <Heading eyebrow="Table open" title={`Waiting for ${opponent.name}`}>
+            <Heading title={`Waiting for ${opponent.name}`}>
               Send this link to your friend. Only the wallet <Mono>{opponent.address}</Mono> can join. When they match your stake the
               match starts by itself, so keep this tab open.
             </Heading>
@@ -395,10 +383,10 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
               </AlertDescription>
             </Alert>
           )}
-          <div className="flex flex-col gap-3 rounded-2xl bg-card p-4">
-            <Eyebrow>Invite link</Eyebrow>
-            <div className="flex flex-wrap gap-2.5">
-              <Input readOnly value={inviteUrl} aria-label="Invite link" className="h-12 min-w-0 flex-[1_1_260px] font-mono text-sm" onFocus={(e) => e.currentTarget.select()} />
+          <div className="flex flex-col gap-2">
+            <label htmlFor="invite-link" className="text-sm font-medium">Invite link</label>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input id="invite-link" readOnly value={inviteUrl} aria-label="Invite link" className="font-mono text-sm sm:flex-1" onFocus={(e) => e.currentTarget.select()} />
               <Button
                 size="xl"
                 onClick={() => {
@@ -411,11 +399,11 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
               </Button>
             </div>
             <span role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
-              <span aria-hidden="true" className="size-2 animate-pulse rounded-full bg-river" />
+              <HourglassIcon aria-hidden="true" className="size-4 shrink-0 text-river" />
               {table.open ? "Nobody has joined yet" : `${opponent.name} hasn’t joined yet`}
             </span>
           </div>
-          <Button variant="outline" size="xl" className="w-fit" disabled={!!busy} onClick={() => void run("Cancelling…", () => cancelTable(wallet!, keys))}>
+          <Button variant="outline" size="xl" className="w-full sm:w-fit" disabled={!!busy} onClick={() => void run("Cancelling…", () => cancelTable(wallet!, keys))}>
             {busy ?? "Cancel and take my stake back"}
           </Button>
         </>,
@@ -429,7 +417,7 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
     if (table.open) {
       if (!linkOk) {
         return layout(
-          <Heading eyebrow="Invite link" title="This link is missing its invite code">
+          <Heading title="This link is missing its invite code">
             Ask your friend to send the whole link: the part after <Mono>#</Mono> is the key that lets you join.
           </Heading>,
           1,
@@ -438,7 +426,7 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
       if (!connected) {
         return layout(
           <>
-            <Heading eyebrow="You’re invited" title={`${creator.name} challenges you`}>
+            <Heading title={`${creator.name} challenges you`}>
               <Mono>{creator.address}</Mono> opened a heads-up match for <Mono>{formatUsdc(table.stake)} USDC</Mono> a side. Connect a
               wallet to take the seat.
             </Heading>
@@ -521,15 +509,15 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
       body = (
         <>
           {table.status === "inPlay" && gameOnSolana ? (
-            <Heading eyebrow="Out of time" title="Refund both stakes">
+            <Heading title="Refund both stakes">
               The match didn’t finish within two hours. Anyone can return both stakes now.
             </Heading>
           ) : (
-            <Heading eyebrow="Match didn’t start" title="Refund both stakes">
+            <Heading title="Refund both stakes">
               The start deadline passed before the match reached the private rollup. Anyone can return both stakes now.
             </Heading>
           )}
-          <Button size="2xl" className="w-fit" disabled={!wallet || !!busy} onClick={doRefund}>
+          <Button size="2xl" className="w-full sm:w-fit" disabled={!wallet || !!busy} onClick={doRefund}>
             {busy ?? "Refund both stakes"}
           </Button>
         </>
@@ -537,7 +525,7 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
     } else if (table.status === "inPlay" && gameOnSolana && playEndsIn === 0) {
       // Out of time and back on Solana: nothing to start, wait for the refund.
       body = (
-        <Heading eyebrow="Out of time" title="Play stopped at the two-hour mark">
+        <Heading title="Play stopped at the two-hour mark">
           The match didn’t finish in time, so no more hands can be played. Either player can return both stakes
           {refundIn ? ` in ${Math.floor(refundIn / 60)}:${String(refundIn % 60).padStart(2, "0")}` : " in a moment"}.
         </Heading>
@@ -547,24 +535,24 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
       const leaving = liveGame?.phase === "finished" || playEndsIn === 0;
       body = leaving ? (
         <>
-          <Heading eyebrow="Match over" title="Bringing the game back to Solana" spinner>
+          <Heading title="Bringing the game back to Solana" spinner>
             {busy ?? "The cards and secrets are wiped, then the result lands on Solana. This takes a few seconds."}
           </Heading>
           {finalHand}
         </>
       ) : (
-        <Heading eyebrow="Both stakes in" title="Opening the private table" spinner>
+        <Heading title="Opening the private table" spinner>
           {busy ?? "Moving the game to MagicBlock’s private rollup. This takes a few seconds."}
         </Heading>
       );
     } else {
       body = (
         <>
-          <Heading eyebrow="Both stakes in" title="Start the match">
+          <Heading title="Start the match">
             The game didn’t reach the private rollup yet. Either player can start it: one approval in the wallet.
           </Heading>
           {me !== null && (
-            <Button size="2xl" className="w-fit" onClick={start}>
+            <Button size="2xl" className="w-full sm:w-fit" onClick={start}>
               Start the match
             </Button>
           )}
@@ -579,13 +567,13 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
     let body: React.ReactNode;
     if (me === null) {
       body = (
-        <Heading eyebrow="Match in play" title="Players only">
+        <Heading title="Players only">
           Only the two players can see this table. Connect <Mono>{creator.address}</Mono> or <Mono>{opponent.address}</Mono> to sit down.
         </Heading>
       );
     } else if (busy) {
       body = (
-        <Heading eyebrow="Match ready" title="Sitting down" spinner>
+        <Heading title="Sitting down" spinner>
           Signing in to the private rollup with this tab’s session key. No wallet prompt needed.
         </Heading>
       );
@@ -593,10 +581,10 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
       // Normally sits down by itself; this shows only if that failed.
       body = (
         <>
-          <Heading eyebrow="Match ready" title="Take your seat">
+          <Heading title="Take your seat">
             This tab has your session key, so sitting down needs no wallet prompt.
           </Heading>
-          <Button size="2xl" className="w-fit" onClick={() => void takeSeat()}>
+          <Button size="2xl" className="w-full sm:w-fit" onClick={() => void takeSeat()}>
             Sit down
           </Button>
         </>
@@ -604,78 +592,62 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
     } else {
       body = (
         <>
-          <Heading eyebrow="Match ready" title="Take your seat">
+          <Heading title="Take your seat">
             This tab doesn’t have your session key for this match (it was staked from another tab or browser). Sign in once; after that
             your moves need no approvals.
           </Heading>
-          <Button size="2xl" className="w-fit" onClick={() => void takeSeat()}>
+          <Button size="2xl" className="w-full sm:w-fit" onClick={() => void takeSeat()}>
             Take your seat
           </Button>
         </>
       );
     }
-    return layout(body, 2, <PrivatePill />);
+    return layout(body, 2, <PrivateStatus />);
   }
 
   // ---- Playing ------------------------------------------------------------------
-  const g = liveGame;
-  const [small, big] = blindsFor(g?.handNumber ?? 1);
-  const pills = (
-    <>
-      {turnPill}
-      {g && g.handNumber > 0 && (
-        <Badge variant="rail" size="lg" className="font-semibold">
-          {g.handNumber > MAX_HANDS ? `Sudden death · hand ${g.handNumber}` : `Hand ${g.handNumber} of ${MAX_HANDS}`}
-        </Badge>
-      )}
-      {g && g.handNumber > 0 && (
-        <Badge variant="rail" size="lg" className="max-sm:hidden">
-          Blinds <span className="font-mono font-semibold">{small} / {big}</span>
-        </Badge>
-      )}
-      <PrivatePill />
-    </>
-  );
   return (
-    <Shell pills={pills}>
+    <Shell
+      table
+      pills={
+        <>
+          <MatchStatus stake={table.stake} handNumber={liveGame?.handNumber ?? 0} />
+          <PrivateStatus />
+        </>
+      }
+    >
       <LiveTable seat={activeSeat} table={table} seats={seats!} busy={busy} onCollect={collect} onRefund={doRefund} onGame={setLiveGame} onAuthLost={authLost} onPlayHere={playHere} />
     </Shell>
   );
 }
 
-/** Header pill and tab title saying whose turn it is, while betting. */
-function useTurnPill(game: GameView | null, me: 0 | 1 | null, seats: [SeatInfo, SeatInfo] | null) {
+/** Tab title saying whose turn it is, while betting. */
+function useTurnTitle(game: GameView | null, me: 0 | 1 | null, seats: [SeatInfo, SeatInfo] | null) {
   const betting = !!game && me !== null && ["preflop", "flop", "turn", "river"].includes(game.phase);
   const mine = betting && game!.toAct === me;
   const theirName = seats && me !== null ? seats[1 - me].name : "";
   useEffect(() => {
     const before = document.title;
-    if (betting) document.title = mine ? "● Your turn · Rival River" : `${theirName}’s turn · Rival River`;
+    // The dot is the one cue a background tab can show.
+    if (betting) document.title = mine ? "● Your turn | Rival River" : `${theirName}’s turn | Rival River`;
     return () => {
       document.title = before;
     };
   }, [betting, mine, theirName]);
-  if (!betting) return null;
-  return mine ? (
-    <Badge variant="brass" size="lg" className="font-semibold">Your turn</Badge>
-  ) : (
-    <Badge variant="river" size="lg" className="font-semibold">{theirName}’s turn</Badge>
-  );
 }
 
 function Mono({ children }: { children: React.ReactNode }) {
   return <span className="font-mono text-foreground">{children}</span>;
 }
 
-function Heading({ eyebrow, title, spinner, children }: { eyebrow: string; title: string; spinner?: boolean; children: React.ReactNode }) {
+function Heading({ title, spinner, children }: { title: string; spinner?: boolean; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-3">
-      <Eyebrow>{eyebrow}</Eyebrow>
-      <h1 className="flex items-center gap-3 font-heading text-5xl leading-none font-extrabold tracking-tight">
-        {spinner && <Spinner className="size-8 text-river" />}
-        {title}
+      <h1 className="flex items-start gap-3 font-heading text-3xl leading-tight font-extrabold tracking-tight sm:text-4xl">
+        {spinner && <Spinner className="mt-1 size-7 shrink-0 text-river sm:mt-1.5" />}
+        <span>{title}</span>
       </h1>
-      <p className="max-w-lg text-lg/relaxed text-muted-foreground">{children}</p>
+      <p className="max-w-lg text-base/relaxed text-muted-foreground">{children}</p>
     </div>
   );
 }
@@ -687,7 +659,7 @@ function JoinPanel({ table, creator, busy, onJoin }: { table: TableView; creator
   const short = balance !== null && balance < table.stake;
   return (
     <>
-      <Heading eyebrow="You’re invited" title={`${creator.name} challenges you`}>
+      <Heading title={`${creator.name} challenges you`}>
         <Mono>{creator.address}</Mono> staked <Mono>{formatUsdc(table.stake)} USDC</Mono>. Match it and the match starts right away: one
         approval in your wallet puts your stake in escrow and opens the private table. Winner takes{" "}
         <Mono>{formatUsdc(table.stake * 2)} USDC</Mono>.
@@ -697,14 +669,14 @@ function JoinPanel({ table, creator, busy, onJoin }: { table: TableView; creator
           <AlertTitle>Not enough devnet USDC</AlertTitle>
           <AlertDescription>
             You have <Mono>{formatUsdc(balance!)} USDC</Mono>. Get some at{" "}
-            <a href="https://faucet.circle.com" target="_blank" rel="noreferrer" className="text-brass underline-offset-4 hover:underline">
+            <a href="https://faucet.circle.com" target="_blank" rel="noreferrer" className="text-foreground underline underline-offset-4">
               faucet.circle.com
             </a>{" "}
             (Solana devnet), plus a little devnet SOL for fees.
           </AlertDescription>
         </Alert>
       )}
-      <Button size="2xl" className="w-fit" disabled={!!busy || short} onClick={onJoin}>
+      <Button size="2xl" className="w-full sm:w-fit" disabled={!!busy || short} onClick={onJoin}>
         {busy && <Spinner data-icon="inline-start" />}
         {busy ?? `Match ${formatUsdc(table.stake)} USDC and play`}
       </Button>
@@ -717,7 +689,7 @@ function WrongWallet({ invited, creatorName, connected }: { invited: string; cre
   if (!connected) {
     return (
       <>
-        <Heading eyebrow="You’re invited" title="Connect to join">
+        <Heading title="Connect to join">
           {creatorName} invited the wallet <Mono>{invited}</Mono> to a heads-up match. Connect that wallet to see the stake and join.
         </Heading>
         <div className="w-fit">
@@ -727,18 +699,9 @@ function WrongWallet({ invited, creatorName, connected }: { invited: string; cre
     );
   }
   return (
-    <Heading eyebrow="Wrong wallet" title="This invite is for another wallet">
+    <Heading title="This invite is for another wallet">
       It’s for <Mono>{invited}</Mono>, and you’re connected as <Mono>{shortKey(connected)}</Mono>. Switch accounts in your wallet app; this
       page updates by itself.
     </Heading>
-  );
-}
-
-function PrivatePill() {
-  return (
-    <Badge variant="river" size="lg" className="font-semibold">
-      <LockIcon />
-      Private rollup
-    </Badge>
   );
 }

@@ -2,7 +2,7 @@
 
 import { motion } from "motion/react";
 import type { Card } from "@/lib/rival";
-import { PlayingCard, type CardSize } from "@/components/rr/playing-card";
+import { CARD_PRESETS, PlayingCard, type CardSize } from "@/components/rr/playing-card";
 import { cn } from "@/lib/utils";
 
 /** A gentle ease-out shared by the flips. */
@@ -79,12 +79,14 @@ export function RevealedCard({ card, width, delay = 0 }: { card: Card; width: Ca
 /**
  * The deck being riffled in the middle of the table while the hand is
  * shuffled: halves split left and right and fall back together, on a loop.
+ * `label` names it for screen readers; the dock shows the words.
  */
 export function ShufflingDeck({ label }: { label: string }) {
   const cards = Array.from({ length: 8 }, (_, i) => i);
   return (
-    <div className="flex flex-col items-center gap-4" role="status" aria-label={label}>
-      <div className="relative h-[90px] w-16">
+    <div role="status" aria-label={label}>
+      {/* The size of a board card, so the shuffle takes the board's room. */}
+      <div className={cn("relative mt-3 h-[calc(var(--cw)*1.4)] w-(--cw)", CARD_PRESETS.board)}>
         {cards.map((i) => {
           const side = i % 2 === 0 ? -1 : 1;
           return (
@@ -100,12 +102,11 @@ export function ShufflingDeck({ label }: { label: string }) {
               }}
               transition={{ duration: 1.2, times: [0, 0.35, 0.6, 1], ease: "easeInOut", delay: i * 0.05, repeat: Infinity, repeatDelay: 0.35 }}
             >
-              <PlayingCard faceDown width={64} />
+              <PlayingCard faceDown width="board" />
             </motion.div>
           );
         })}
       </div>
-      <span className="text-sm font-semibold tracking-[0.12em] text-mist uppercase">{label}</span>
     </div>
   );
 }

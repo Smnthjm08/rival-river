@@ -20,13 +20,10 @@ interface ActionBarProps {
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
-/** On phones the bar is pinned to the bottom of the screen, so acting never needs a scroll. */
-export const PINNED_ON_PHONES = "max-md:fixed max-md:w-auto max-md:inset-x-2 max-md:bottom-2 max-md:z-30 max-md:shadow-[0_-12px_40px_rgb(0_0_0/0.55)]";
-
 /**
- * Turn controls, at the top of the right-hand column. On your turn: Fold,
- * Check/Call, and a raise slider with ½ pot / Pot / All-in. Otherwise: whose
- * turn it is and their clock.
+ * Turn controls, in the dock under the table. On your turn: Fold, Check/Call,
+ * and a raise slider with ½ pot / Pot / All-in. Otherwise: whose turn it is
+ * and their clock. One column on phones, one row on wide screens.
  */
 export function ActionBar({ game, me, opponentName, acting, onAct }: ActionBarProps) {
   // Before the clock's first tick, assume a full turn rather than "out of time".
@@ -59,11 +56,11 @@ export function ActionBar({ game, me, opponentName, acting, onAct }: ActionBarPr
 
   if (!myTurn) {
     return (
-      <div className={cn("flex items-center gap-3 rounded-[1.25rem] bg-card p-4", PINNED_ON_PHONES)} role="status">
+      <div className="flex items-center gap-3 rounded-2xl bg-card px-4 py-3 md:px-5" role="status">
         <TurnTimer secondsLeft={secondsLeft} total={TURN_SECONDS} />
         <div className="flex flex-col">
-          <span className="text-[15px] font-semibold">{opponentName}’s turn</span>
-          <span className="text-[13px] text-muted-foreground">
+          <span className="font-semibold">{opponentName}’s turn</span>
+          <span className="text-sm text-muted-foreground tabular-nums">
             {secondsLeft > 0 ? `${secondsLeft} s left` : "Out of time: claiming the timeout for you…"}
           </span>
         </div>
@@ -81,33 +78,33 @@ export function ActionBar({ game, me, opponentName, acting, onAct }: ActionBarPr
   ];
 
   return (
-    <div className={cn("flex flex-col gap-3.5 rounded-[1.25rem] bg-card p-4 ring-2 ring-brass/70 max-md:gap-2.5 max-md:p-3", PINNED_ON_PHONES)}>
-      <div className="flex items-center gap-2.5">
+    <div className="grid content-center gap-2 rounded-2xl bg-card p-2.5 ring-1 ring-river/60 md:grid-cols-[auto_minmax(0,1fr)] md:items-center md:gap-x-6 md:p-3 lg:grid-cols-[auto_auto_minmax(0,1fr)] lg:px-5">
+      <div className="flex items-center gap-3 md:min-w-52">
         <TurnTimer secondsLeft={secondsLeft} total={TURN_SECONDS} />
         <div className="flex flex-col">
-          <span className="text-[15px] font-semibold text-brass">Your turn</span>
-          <span className="text-[13px] text-muted-foreground">{secondsLeft} s left · amounts in chips</span>
+          <span className="font-semibold">Your turn</span>
+          <span className="text-sm text-muted-foreground tabular-nums">{secondsLeft} s left. Amounts in chips</span>
         </div>
       </div>
 
-      <div className={cn("grid grid-cols-2 gap-2", canRaise && !raiseOpen && "max-md:grid-cols-3")}>
-        <Button variant="fold" size="xl" disabled={acting} onClick={() => act({ fold: {} })}>
+      <div className={cn("grid grid-cols-2 gap-2 lg:w-64", canRaise && !raiseOpen && "max-md:grid-cols-3")}>
+        <Button variant="fold" size="xl" className="px-2" disabled={acting} onClick={() => act({ fold: {} })}>
           Fold
         </Button>
-        <Button variant="secondary" size="xl" disabled={acting} onClick={() => act(toCall === 0 ? { check: {} } : { call: {} })}>
+        <Button variant="secondary" size="xl" className="px-2" disabled={acting} onClick={() => act(toCall === 0 ? { check: {} } : { call: {} })}>
           {callLabel}
         </Button>
         {canRaise && !raiseOpen && (
-          <Button size="xl" className="md:hidden" disabled={acting} onClick={() => setRaiseOpen(true)}>
+          <Button size="xl" className="px-2 md:hidden" disabled={acting} onClick={() => setRaiseOpen(true)}>
             {raiseVerb === "Bet" ? "Bet…" : "Raise…"}
           </Button>
         )}
       </div>
 
       {canRaise && (
-        <div className={cn("flex flex-col gap-2.5", !raiseOpen && "max-md:hidden")}>
+        <div className={cn("flex flex-col gap-2 md:col-span-2 md:flex-row md:items-center md:gap-5 lg:col-span-1", !raiseOpen && "max-md:hidden")}>
           {maxTo > minTo && (
-            <>
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
               <Slider
                 aria-label="Raise amount"
                 min={minTo}
@@ -115,7 +112,6 @@ export function ActionBar({ game, me, opponentName, acting, onAct }: ActionBarPr
                 step={1}
                 value={[raiseTo]}
                 onValueChange={(v) => setChosen(Array.isArray(v) ? v[0] : v)}
-                className="py-2"
               />
               <div className="grid grid-cols-3 gap-2">
                 {presets.map((p) => (
@@ -124,9 +120,9 @@ export function ActionBar({ game, me, opponentName, acting, onAct }: ActionBarPr
                   </Button>
                 ))}
               </div>
-            </>
+            </div>
           )}
-          <Button size="xl" disabled={acting} onClick={() => act({ raise: { to: raiseTo } })}>
+          <Button size="xl" className="md:ml-auto md:w-44" disabled={acting} onClick={() => act({ raise: { to: raiseTo } })}>
             {acting && <Spinner data-icon="inline-start" />}
             <span className="font-sans">{raiseLabel.replace(/\d+$/, "")}</span>
             <span className="font-mono">{raiseTo}</span>

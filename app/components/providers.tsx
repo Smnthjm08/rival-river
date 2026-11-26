@@ -18,7 +18,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
         <TooltipProvider>
           {/* Card deals and flips skip their movement for "reduce motion". */}
           <MotionConfig reducedMotion="user">{children}</MotionConfig>
-          <Toaster theme="dark" position="bottom-right" />
+          {/* Top of the screen: a toast must never cover the table's actions. */}
+          <Toaster theme="dark" position="top-center" />
         </TooltipProvider>
       </WalletProvider>
     </ConnectionProvider>

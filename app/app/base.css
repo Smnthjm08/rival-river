@@ -1,0 +1,52 @@
+/* Element defaults every screen shares. Utilities can override the layered ones. */
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  html,
+  body {
+    overflow-x: clip;
+  }
+  html {
+    font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+    color-scheme: dark;
+    scrollbar-color: var(--pine) var(--ink);
+  }
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    caret-color: var(--brass);
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--river) 35%, transparent);
+    color: var(--text);
+  }
+  h1,
+  h2,
+  h3 {
+    min-width: 0;
+    overflow-wrap: break-word;
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+
+  /* Important in the base layer, so it also beats animation utilities. */
+  @media (prefers-reduced-motion: reduce) {
+    *:not(.keep-motion),
+    *:not(.keep-motion)::before,
+    *:not(.keep-motion)::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* Unlayered on purpose: no utility can remove the keyboard focus ring. */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}

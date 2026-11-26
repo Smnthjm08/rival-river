@@ -3,11 +3,9 @@
 import { useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { BN } from "@anchor-lang/core";
-import { LockIcon } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SiteHeader } from "@/components/rr/site-header";
-import { Eyebrow } from "@/components/rr/table-pieces";
+import { MatchStatus, PrivateStatus } from "@/components/rr/table-pieces";
 import { ActionBar } from "@/components/rr/table/action-bar";
 import { Felt, type SeatInfo } from "@/components/rr/table/felt";
 import { MatchSidebar } from "@/components/rr/table/match-sidebar";
@@ -28,6 +26,7 @@ const results: HandResult[] = [
   { handNumber: 2, board: [c("Ah"), c("Jd"), c("2c"), c("9h"), c("2s")], shown: [[c("5h"), c("4c")], [c("6d"), c("Qc")]], stacks: [85, 115], won: [-20, 20] },
 ];
 const BOARD = [c("Kh"), c("7c"), c("Qd"), c("2s"), c("9h")];
+const STAKE = 10_000_000;
 
 /** The stages the preview can replay, in order. */
 const STAGES = ["dealing", "preflop", "flop", "turn", "river"] as const satisfies readonly Phase[];
@@ -83,48 +82,47 @@ export function TablePreview() {
 
   return (
     <>
-      <SiteHeader>
-        {!dealing &&
-          (toAct === 0 ? (
-            <Badge variant="brass" size="lg" className="font-semibold">Your turn</Badge>
-          ) : (
-            <Badge variant="river" size="lg" className="font-semibold">The Otter’s turn</Badge>
-          ))}
-        <Badge variant="rail" size="lg" className="font-semibold">Hand 3 of 6</Badge>
-        <Badge variant="rail" size="lg" className="max-sm:hidden">Blinds <span className="font-mono font-semibold">20 / 40</span></Badge>
-        <Badge variant="river" size="lg" className="font-semibold"><LockIcon />Private rollup</Badge>
+      <SiteHeader quiet>
+        <MatchStatus stake={STAKE} handNumber={3} />
+        <PrivateStatus />
       </SiteHeader>
-      <main className="mx-auto w-full max-w-360 px-4 py-6 sm:px-8 sm:pb-10">
-        <div className="mb-4 flex flex-wrap items-center gap-2">
-          <Eyebrow className="mr-2">Preview · replay</Eyebrow>
-          {STAGES.map((s) => (
-            <Button key={s} size="sm" variant={s === stage ? "default" : "outline"} onClick={(e) => play(s, (performance.timeOrigin + e.timeStamp) / 1000)}>
-              {STAGE_LABEL[s]}
-            </Button>
-          ))}
-        </div>
-        <div className="flex flex-wrap gap-6 max-md:pb-32">
-          <section aria-label="Table" className="flex min-w-0 flex-[999_1_720px] flex-col gap-4.5">
-            <Felt
-              key={run}
-              game={g}
-              hand={{ cards: dealing ? null : [c("Ks"), c("7h")], hasSecret: dealing }}
-              me={0}
-              seats={seats}
-              lastResult={results[1]}
-            />
-          </section>
-          <MatchSidebar
+      <main className="mx-auto w-full max-w-360 px-2 sm:px-4">
+        <MatchSidebar
+          game={g}
+          me={0}
+          names={["You", "The Otter"]}
+          stake={STAKE}
+          keys={keys}
+          results={results}
+          lastResult={results[1]}
+          controls={dealing ? <ShuffleSteps hand={3} secretIn /> : <ActionBar game={g} me={0} opponentName="The Otter" acting={false} onAct={async () => setToAct(1)} />}
+          toolbar={
+            <div role="group" aria-label="Preview replay" className="flex flex-wrap items-center justify-center gap-1.5">
+              <span aria-hidden="true" className="mr-2 text-sm text-muted-foreground max-sm:hidden">Preview replay</span>
+              {STAGES.map((s) => (
+                <Button
+                  key={s}
+                  size="sm"
+                  variant={s === stage ? "secondary" : "outline"}
+                  aria-pressed={s === stage}
+                  className="max-sm:flex-1 max-sm:px-1"
+                  onClick={(e) => play(s, (performance.timeOrigin + e.timeStamp) / 1000)}
+                >
+                  {STAGE_LABEL[s]}
+                </Button>
+              ))}
+            </div>
+          }
+        >
+          <Felt
+            key={run}
             game={g}
+            hand={{ cards: dealing ? null : [c("Ks"), c("7h")], hasSecret: dealing }}
             me={0}
-            names={["You", "The Otter"]}
-            stake={10_000_000}
-            keys={keys}
-            results={results}
+            seats={seats}
             lastResult={results[1]}
-            controls={dealing ? <ShuffleSteps hand={3} secretIn /> : <ActionBar game={g} me={0} opponentName="The Otter" acting={false} onAct={async () => setToAct(1)} />}
           />
-        </div>
+        </MatchSidebar>
       </main>
     </>
   );

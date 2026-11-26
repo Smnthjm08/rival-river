@@ -1,5 +1,4 @@
-import { CheckIcon } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
+import { CheckIcon, CircleDotIcon, CircleIcon } from "lucide-react";
 import { SeatAvatar, type Character } from "@/components/rr/seat-avatar";
 import { formatUsdc } from "@/hooks/use-usdc-balance";
 import { cn } from "@/lib/utils";
@@ -22,63 +21,57 @@ export function StakesReview({
   steps: { label: string; state: StepState }[];
 }) {
   return (
-    <Card size="lg" className="bg-felt">
-      <CardContent className="flex flex-col gap-6">
-        <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4">
-          {seats.map((s, i) => {
-            const deposited = i === 0 || opponentDeposited;
-            const seat = (
-              <div key={s.name + i} className="flex flex-col items-center gap-2.5 text-center">
-                <SeatAvatar who={s.character} size={84} state={deposited ? "winner" : "idle"} />
-                <span className="flex flex-col items-center">
-                  <span className="font-semibold">{s.name}</span>
-                  <span className="text-[13px] text-muted-foreground">
-                    {ROLES[i]}
-                    {s.address && <> · <span className="font-mono">{s.address}</span></>}
-                  </span>
-                </span>
-                <span className="font-mono text-xl text-brass">{formatUsdc(stake)} USDC</span>
-                {deposited ? (
-                  <span className="flex items-center gap-1.5 text-[13px] text-river">
-                    <CheckIcon aria-hidden="true" className="size-3.5" strokeWidth={2.6} />
-                    Deposited
-                  </span>
-                ) : (
-                  <span className="text-[13px] text-muted-foreground">Waiting for deposit</span>
-                )}
-              </div>
-            );
-            return i === 0 ? (
-              [seat, <span key="vs" className="font-heading text-[28px] font-extrabold text-muted-foreground">vs</span>]
-            ) : (
-              seat
-            );
-          })}
-        </div>
-
-        <div className="flex items-baseline justify-between rounded-2xl bg-ink px-5 py-4.5">
-          <span className="text-[15px] text-muted-foreground">Winner takes</span>
-          <span className="font-mono text-[30px] font-semibold text-brass">{formatUsdc(stake * 2)} USDC</span>
-        </div>
-
-        <ol className="flex flex-col gap-3">
-          {steps.map((s) => (
-            <li key={s.label} className="flex items-center gap-3 text-[15px]">
-              <span
-                className={cn(
-                  "flex size-6.5 shrink-0 items-center justify-center rounded-full",
-                  s.state === "done" && "bg-river text-ink",
-                  s.state === "now" && "border-2 border-brass",
-                  s.state === "later" && "border-2 border-foreground/20",
-                )}
-              >
-                {s.state === "done" && <CheckIcon aria-hidden="true" className="size-3.5" strokeWidth={3} />}
+    <div className="flex flex-col gap-5 rounded-3xl bg-card p-5 sm:p-6">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-3">
+        {seats.map((s, i) => {
+          const deposited = i === 0 || opponentDeposited;
+          const seat = (
+            <div key={s.name + i} className="flex min-w-0 flex-col items-center gap-2 text-center">
+              <SeatAvatar who={s.character} size={64} state={deposited ? "winner" : "idle"} />
+              <span className="flex flex-col items-center">
+                <span className="font-semibold">{s.name}</span>
+                <span className="text-sm text-muted-foreground">{ROLES[i]}</span>
+                {s.address && <span className="font-mono text-xs text-muted-foreground">{s.address}</span>}
               </span>
-              <span className={s.state === "later" ? "text-muted-foreground" : undefined}>{s.label}</span>
+              <span className="font-mono text-lg text-brass">{formatUsdc(stake)} USDC</span>
+              {deposited ? (
+                <span className="flex items-center gap-1.5 text-sm text-river">
+                  <CheckIcon aria-hidden="true" className="size-4 shrink-0" strokeWidth={2.6} />
+                  Deposited
+                </span>
+              ) : (
+                <span className="text-sm text-muted-foreground">Waiting for deposit</span>
+              )}
+            </div>
+          );
+          return i === 0 ? (
+            [seat, <span key="vs" className="mt-4 font-heading text-2xl font-extrabold text-muted-foreground">vs</span>]
+          ) : (
+            seat
+          );
+        })}
+      </div>
+
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 border-y py-4">
+        <span className="text-muted-foreground">Winner takes</span>
+        <span className="font-mono text-3xl font-semibold text-brass">{formatUsdc(stake * 2)} USDC</span>
+      </div>
+
+      <ol className="flex flex-col gap-3">
+        {steps.map((s) => {
+          const Icon = s.state === "done" ? CheckIcon : s.state === "now" ? CircleDotIcon : CircleIcon;
+          return (
+            <li key={s.label} className="flex items-start gap-3 text-sm/relaxed" aria-current={s.state === "now" ? "step" : undefined}>
+              <Icon
+                aria-hidden="true"
+                className={cn("mt-0.5 size-4.5 shrink-0", s.state === "later" ? "text-mist/60" : "text-river")}
+                strokeWidth={s.state === "done" ? 2.6 : 2}
+              />
+              <span className={s.state === "later" ? "text-muted-foreground" : s.state === "now" ? "font-semibold" : undefined}>{s.label}</span>
             </li>
-          ))}
-        </ol>
-      </CardContent>
-    </Card>
+          );
+        })}
+      </ol>
+    </div>
   );
 }

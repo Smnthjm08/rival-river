@@ -1,0 +1,77 @@
+/*
+ * Every colour, shadow and shared size in the app. The palette is the Rival
+ * River kit: eight colours, each with one job.
+ *   ink    page background        felt  table surface, card backs
+ *   rail   table edge, panels     river privacy and live states
+ *   brass  stakes, chips, the main action (and nothing else)
+ *   bone   card faces             ember hearts and diamonds   fold folding
+ *   mist   secondary text
+ * The app is dark-only; shadcn's semantic roles map onto these below.
+ */
+:root,
+.dark {
+  /* Kit palette */
+  --ink: #0b1416;
+  --felt: #0f3b3a;
+  --rail: #0a2a29;
+  --pine: #14504e;
+  --river: #3fb6a8;
+  --brass: #e0a84a;
+  --bone: #f6f1e7;
+  --ember: #b3261e;
+  --mist: #a9bdb9;
+  --fold: #f0a49c;
+  --card-ink: #16181a;
+  --chip-river: #2f8f84;
+
+  /* Supporting shades */
+  --text: #e8ecea;
+  --card-edge: #e2d9c6; /* the hairline round a card face */
+  --spent: #5e6e6b; /* a hand already played and not won */
+  --line: rgb(232 236 234 / 10%); /* hairlines between sections */
+  --edge: rgb(232 236 234 / 40%); /* field and control edges: 3:1 on rail */
+  --track: rgb(169 189 185 / 55%); /* slider and timer tracks: 3:1 on rail */
+  --scrim: rgb(0 0 0 / 80%);
+
+  /* Depth */
+  --lift-felt: inset 0 0 0 2px rgb(63 182 168 / 0.16), 0 24px 48px rgb(0 0 0 / 0.35);
+  --lift-card: 0 0.25em 0.8em rgb(0 0 0 / 0.3);
+  --lift-card-won: 0 0 0 0.22em var(--brass), 0 0.5em 1.4em rgb(0 0 0 / 0.4);
+
+  /* shadcn roles */
+  --background: var(--ink);
+  --foreground: var(--text);
+  --card: var(--rail);
+  --card-foreground: var(--text);
+  --popover: var(--rail);
+  --popover-foreground: var(--text);
+  --primary: var(--brass);
+  --primary-foreground: var(--ink);
+  --secondary: var(--pine);
+  --secondary-foreground: var(--text);
+  --muted: var(--felt);
+  --muted-foreground: var(--mist);
+  --accent: var(--pine);
+  --accent-foreground: var(--text);
+  --destructive: var(--fold);
+  --border: var(--line);
+  --input: var(--edge);
+  --ring: var(--river);
+  --chart-1: var(--brass);
+  --chart-2: var(--river);
+  --chart-3: var(--bone);
+  --chart-4: var(--mist);
+  --chart-5: var(--pine);
+  --sidebar: var(--rail);
+  --sidebar-foreground: var(--text);
+  --sidebar-primary: var(--brass);
+  --sidebar-primary-foreground: var(--ink);
+  --sidebar-accent: var(--pine);
+  --sidebar-accent-foreground: var(--text);
+  --sidebar-border: var(--line);
+  --sidebar-ring: var(--river);
+
+  /* Shared sizes */
+  --radius: 0.875rem;
+  --header-h: 3.5rem;
+}

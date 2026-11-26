@@ -1,36 +1,52 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Rival River web app
 
-## Getting Started
+The Next.js client for [Rival River](../README.md). Game rules, how the program
+uses MagicBlock, and known limitations are in the main README.
 
-First, run the development server:
-
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```sh
+bun install
+bun dev        # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+| Route | What it shows |
+| --- | --- |
+| `/` | Create a table |
+| `/table/[creator]/[tableId]` | Join, play and collect |
+| `/preview` | The table with sample data, no wallet needed |
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Layout
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Path | Contents |
+| --- | --- |
+| `app/` | Routes |
+| `components/rr/` | Game interface |
+| `components/ui/` | shadcn components |
+| `hooks/` | Table and match polling, wallet |
+| `lib/rival/` | Everything that talks to the chain |
 
-## Learn More
+`lib/rival` is split by job: `actions/` (lobby, rollup moves, automatic steps,
+payout, refunds), `chain/` (connections, addresses, transactions, rollup
+sign-in), `session/` (session keys and invite links) and `game/` (cards and
+state). It has no React in it, so `scripts/lib-smoke.ts` plays a real devnet
+match with the same code.
 
-To learn more about Next.js, take a look at the following resources:
+## Configuration
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+`NEXT_PUBLIC_BASE_RPC` overrides the Solana devnet RPC. It is visible in the
+browser, so don’t put a private API key in it.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## After changing the program
 
-## Deploy on Vercel
+```sh
+anchor build        # in the repository root
+bun run sync-idl    # in app/
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Deploy the program before shipping an app built against its new interface.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Checks
+
+```sh
+bun run lint
+bun run build
+```

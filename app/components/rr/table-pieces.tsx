@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { LockIcon } from "lucide-react";
+import { formatUsdc } from "@/hooks/use-usdc-balance";
+import { blindsFor, MAX_HANDS } from "@/lib/rival";
 import { cn } from "@/lib/utils";
 
 /** Kit chip in River: used beside bets. */
@@ -16,10 +19,10 @@ export function ChipIcon({ className }: { className?: string }) {
 /** Centre-of-table pot: the one big brass number. */
 export function PotPill({ amount }: { amount: number }) {
   return (
-    <div className="flex items-center gap-2.5 rounded-full border border-brass/50 bg-ink px-4.5 py-2">
-      <span className="text-xs font-semibold tracking-[0.12em] text-mist uppercase">Pot</span>
+    <div className="flex items-baseline gap-2 rounded-full bg-ink px-4 py-1 text-sm text-mist md:py-1.5">
+      <span>Pot</span>
       <span className="font-mono text-xl font-semibold text-brass tabular-nums">{amount}</span>
-      <span className="text-xs text-mist">chips</span>
+      <span>chips</span>
     </div>
   );
 }
@@ -27,9 +30,11 @@ export function PotPill({ amount }: { amount: number }) {
 /** A player's bet on the current street. */
 export function BetPill({ amount }: { amount: number }) {
   return (
-    <div className="flex items-center gap-2 rounded-full bg-ink/60 px-3.5 py-1.5 font-mono text-sm tabular-nums">
+    <div className="flex items-center gap-2 rounded-full bg-ink/60 px-3 py-1 text-sm">
       <ChipIcon />
-      Bet {amount} chips
+      <span>
+        Bet <span className="font-mono tabular-nums">{amount}</span> chips
+      </span>
     </div>
   );
 }
@@ -39,9 +44,42 @@ export function DealerButton() {
     <span
       role="img"
       aria-label="Dealer button"
-      className="flex size-7 items-center justify-center rounded-full bg-bone font-heading text-[15px] font-extrabold text-ink"
+      className="flex size-7 shrink-0 items-center justify-center rounded-full bg-bone font-heading text-[15px] font-extrabold text-ink"
     >
       D
+    </span>
+  );
+}
+
+/** Header: what's being played for, then where the match is. Hand 0: not dealt yet. */
+export function MatchStatus({ stake, handNumber }: { stake: number; handNumber: number }) {
+  const [small, big] = blindsFor(handNumber || 1);
+  return (
+    <div className="flex min-w-0 flex-col text-[13px]/tight whitespace-nowrap md:flex-row md:items-baseline md:gap-5 md:text-sm">
+      <span>
+        <span className="max-[23rem]:sr-only">Winner takes </span>
+        <span className="font-mono font-semibold text-brass">{formatUsdc(stake * 2)} USDC</span>
+      </span>
+      {handNumber > 0 && (
+        <span className="text-muted-foreground">
+          {handNumber > MAX_HANDS ? `Sudden death, hand ${handNumber}` : `Hand ${handNumber} of ${MAX_HANDS}`}
+        </span>
+      )}
+      {handNumber > 0 && (
+        <span className="text-muted-foreground max-sm:hidden">
+          Blinds <span className="font-mono text-foreground">{small} / {big}</span>
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Header: this table is on the private rollup. The words show where there's room. */
+export function PrivateStatus() {
+  return (
+    <span title="Private rollup" className="flex shrink-0 items-center gap-1.5 text-sm font-semibold text-river">
+      <LockIcon aria-hidden="true" className="size-4.5" />
+      <span className="max-lg:sr-only">Private rollup</span>
     </span>
   );
 }
@@ -67,21 +105,21 @@ export function useSecondsLeft(deadline: number | null): number | null {
 }
 
 /**
- * Kit turn timer: a ring in river while there's time, brass in the last 5 s.
- * `total` is the full turn length, so the ring shows the share left.
+ * Kit turn timer: a ring in river while there's time, in the fold colour for
+ * the last 5 s. `total` is the full turn length, so the ring shows the share left.
  */
 export function TurnTimer({ secondsLeft, total = 30, className }: { secondsLeft: number; total?: number; className?: string }) {
   const circumference = 94.2;
   const filled = Math.max(0, Math.min(1, secondsLeft / total)) * circumference;
   return (
-    <svg viewBox="0 0 36 36" aria-hidden="true" className={cn("size-9", className)}>
-      <circle cx="18" cy="18" r="15" fill="none" stroke="rgb(232 236 234 / 0.14)" strokeWidth="4" />
+    <svg viewBox="0 0 36 36" aria-hidden="true" className={cn("size-9 shrink-0", className)}>
+      <circle cx="18" cy="18" r="15" fill="none" stroke="var(--line)" strokeWidth="4" />
       <circle
         cx="18"
         cy="18"
         r="15"
         fill="none"
-        stroke={secondsLeft <= 5 ? "var(--brass)" : "var(--river)"}
+        stroke={secondsLeft <= 5 ? "var(--fold)" : "var(--river)"}
         strokeWidth="4"
         strokeLinecap="round"
         strokeDasharray={`${filled} ${circumference}`}
@@ -90,9 +128,4 @@ export function TurnTimer({ secondsLeft, total = 30, className }: { secondsLeft:
       />
     </svg>
   );
-}
-
-/** Uppercase section label used across the kit's panels. */
-export function Eyebrow({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <span className={cn("text-xs font-semibold tracking-[0.14em] text-mist uppercase", className)}>{children}</span>;
 }

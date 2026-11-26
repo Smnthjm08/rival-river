@@ -13,21 +13,24 @@ const SUIT_NAMES = { s: "spades", h: "hearts", d: "diamonds", c: "clubs" };
 const RANK_NAMES: Record<string, string> = { A: "Ace", K: "King", Q: "Queen", J: "Jack", "10": "Ten" };
 
 /**
- * Card size: a width in px, or a responsive preset (smaller on phones).
- * Kit sizes: hand 96, board 84, seat 58, log 40.
+ * Card size: a width in px, or a preset for the felt. Presets shrink with the
+ * felt's width, and with the height left once seats, bets and pot are placed
+ * (the px subtracted below), so the whole table fits one screen. Kit sizes are
+ * the ceilings: hand 96, board 84, opponent 58.
  */
-export type CardSize = number | "board" | "hand";
+export type CardSize = number | "board" | "hand" | "opp";
 
-const PRESETS = {
-  board: "[--cw:52px] sm:[--cw:84px]",
-  hand: "[--cw:76px] sm:[--cw:96px]",
+export const CARD_PRESETS = {
+  board: "[--cw:min(17cqw,84px,calc((100cqh_-_250px)*0.32))] md:[--cw:min(84px,calc((100cqh_-_220px)*0.3))]",
+  hand: "[--cw:min(23cqw,96px,calc((100cqh_-_250px)*0.4))] md:[--cw:min(96px,calc((100cqh_-_220px)*0.36))]",
+  opp: "[--cw:min(13cqw,7.5cqh,58px)] md:[--cw:min(58px,10.5cqh)]",
 };
 
 /** Everything inside a card scales from --cw through em units, as in the kit. */
 function sizing(size: CardSize) {
   const style: React.CSSProperties = { width: "var(--cw)", height: "calc(var(--cw) * 1.4)", fontSize: "calc(var(--cw) / 10)" };
   if (typeof size === "number") return { className: "", style: { ...style, ["--cw" as string]: `${size}px` } };
-  return { className: PRESETS[size], style };
+  return { className: CARD_PRESETS[size], style };
 }
 
 interface PlayingCardProps {
@@ -63,7 +66,7 @@ export function PlayingCard({ card, faceDown = false, width = 84, highlight, dim
       aria-label={label}
       className={cn(
         "relative shrink-0 rounded-[0.8em] font-heading transition-opacity",
-        highlight ? "shadow-[0_0_0_0.22em_var(--brass),0_0.5em_1.4em_rgb(0_0_0/0.4)]" : "shadow-[0_0.25em_0.8em_rgb(0_0_0/0.3)]",
+        highlight ? "shadow-card-won" : "shadow-card-face",
         dim && "opacity-35",
         red ? "text-ember" : "text-card-ink",
         size.className,
@@ -87,7 +90,7 @@ export function PlayingCard({ card, faceDown = false, width = 84, highlight, dim
           </div>
         </div>
       ) : (
-        <div className="absolute inset-0 overflow-hidden rounded-[0.8em] border-[0.1em] border-[#e2d9c6] bg-bone">
+        <div className="absolute inset-0 overflow-hidden rounded-[0.8em] border-[0.1em] border-card-edge bg-bone">
           <div className="absolute top-[0.55em] left-[0.7em] flex flex-col items-center gap-[0.2em]">
             <span className="text-[2.8em] leading-[0.95] font-bold tracking-[-0.05em]">{rank}</span>
             <svg viewBox="0 0 24 24" aria-hidden="true" className="size-[1.9em]">

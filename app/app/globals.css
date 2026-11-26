@@ -1,18 +1,17 @@
+/* Hallmark · shape: app screen · genre: atmospheric · theme: brand · redesign: full
+ * paper: #0b1416 · accent: #e0a84a · display: Bricolage Grotesque · body: Inter
+ * nav: one 56px bar · signature: the table, opponent across and your hand beside the actions · states: loading, empty, waiting, live, error, settled
+ * axes: dark/grotesque/brass · posture: committed (felt) · contrast: pass · v2.0.0 */
+/* Hallmark · pre-emit critique: P4 H4 E4 S4 R4 V3 · weakest: V, a redesign keeps the product's own structure; the change is the one-screen table with a docked action bar */
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "./tokens.css";
+@import "./base.css";
 
 @custom-variant dark (&:is(.dark *));
 
-/*
- * Rival River design kit. Eight colours, each with one job:
- *   ink    page background        felt  table surface, card backs
- *   rail   table edge, panels     river privacy and live states
- *   brass  stakes, chips, the main action (and nothing else)
- *   bone   card faces             ember hearts, diamonds, fold
- *   mist   secondary text
- * The app is dark-only; shadcn's semantic roles map onto these below.
- */
+/* Maps the tokens onto Tailwind's names. */
 @theme inline {
   --color-ink: var(--ink);
   --color-felt: var(--felt);
@@ -26,6 +25,14 @@
   --color-fold: var(--fold);
   --color-card-ink: var(--card-ink);
   --color-chip-river: var(--chip-river);
+  --color-card-edge: var(--card-edge);
+  --color-spent: var(--spent);
+  --color-track: var(--track);
+  --color-scrim: var(--scrim);
+
+  --shadow-felt: var(--lift-felt);
+  --shadow-card-face: var(--lift-card);
+  --shadow-card-won: var(--lift-card-won);
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -70,66 +77,8 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-:root,
-.dark {
-  /* Kit palette */
-  --ink: #0b1416;
-  --felt: #0f3b3a;
-  --rail: #0a2a29;
-  --pine: #14504e;
-  --river: #3fb6a8;
-  --brass: #e0a84a;
-  --bone: #f6f1e7;
-  --ember: #b3261e;
-  --mist: #a9bdb9;
-  --fold: #f0a49c;
-  --card-ink: #16181a;
-  --chip-river: #2f8f84;
-
-  /* shadcn roles */
-  --background: var(--ink);
-  --foreground: #e8ecea;
-  --card: var(--rail);
-  --card-foreground: #e8ecea;
-  --popover: var(--rail);
-  --popover-foreground: #e8ecea;
-  --primary: var(--brass);
-  --primary-foreground: var(--ink);
-  --secondary: var(--pine);
-  --secondary-foreground: #e8ecea;
-  --muted: #10201f;
-  --muted-foreground: var(--mist);
-  --accent: var(--pine);
-  --accent-foreground: #e8ecea;
-  --destructive: var(--fold);
-  --border: rgb(232 236 234 / 10%);
-  --input: rgb(232 236 234 / 16%);
-  --ring: var(--river);
-  --chart-1: var(--brass);
-  --chart-2: var(--river);
-  --chart-3: var(--bone);
-  --chart-4: var(--mist);
-  --chart-5: var(--pine);
-  --radius: 0.875rem;
-  --sidebar: var(--rail);
-  --sidebar-foreground: #e8ecea;
-  --sidebar-primary: var(--brass);
-  --sidebar-primary-foreground: var(--ink);
-  --sidebar-accent: var(--pine);
-  --sidebar-accent-foreground: #e8ecea;
-  --sidebar-border: rgb(232 236 234 / 10%);
-  --sidebar-ring: var(--river);
-}
-
 @layer base {
   * {
-    @apply border-border outline-ring/50;
-  }
-  body {
-    @apply bg-background text-foreground;
-  }
-  html {
-    @apply font-sans;
-    color-scheme: dark;
+    @apply outline-ring/50;
   }
 }

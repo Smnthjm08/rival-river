@@ -16,16 +16,20 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { shortKey } from "@/hooks/use-wallet-signer";
 
-/** Header wallet control: connect dialog, or the address with copy/disconnect. */
-export function WalletButton() {
+/**
+ * Wallet control: connect dialog, or the address with copy/disconnect.
+ * `compact` shortens it on phones (the header); `quiet` leaves brass to the
+ * screen's own main action.
+ */
+export function WalletButton({ compact, quiet }: { compact?: boolean; quiet?: boolean }) {
   const { wallets, select, publicKey, disconnect, connecting } = useWallet();
   const [open, setOpen] = useState(false);
 
   if (publicKey) {
     return (
       <DropdownMenu>
-        <DropdownMenuTrigger render={<Button variant="outline" size="pill" className="font-mono" />}>
-          <span aria-hidden="true" className="size-2 rounded-full bg-river" />
+        <DropdownMenuTrigger render={<Button variant="outline" size="pill" className="font-mono max-sm:px-3" />}>
+          <WalletIcon aria-hidden="true" className={compact ? "max-sm:hidden" : undefined} />
           {shortKey(publicKey)}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
@@ -53,9 +57,19 @@ export function WalletButton() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button size="pill" className="font-semibold" disabled={connecting} />}>
+      <DialogTrigger
+        render={<Button variant={quiet ? "outline" : "default"} size="pill" className="font-semibold max-sm:px-3" disabled={connecting} />}
+      >
         <WalletIcon data-icon="inline-start" />
-        {connecting ? "Connecting…" : "Connect wallet"}
+        <span>
+          {connecting ? (
+            "Connecting…"
+          ) : (
+            <>
+              Connect<span className={compact ? "max-sm:sr-only" : undefined}> wallet</span>
+            </>
+          )}
+        </span>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
