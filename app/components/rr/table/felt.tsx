@@ -1,8 +1,10 @@
 import { LockIcon } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import type { GameView, HandResult, HandView } from "@/lib/rival";
 import { EmptyCardSlot, PlayingCard } from "@/components/rr/playing-card";
 import { SeatAvatar, type Character, type SeatState } from "@/components/rr/seat-avatar";
 import { BetPill, DealerButton, PotPill } from "@/components/rr/table-pieces";
+import { cn } from "@/lib/utils";
 
 const BETTING = new Set(["preflop", "flop", "turn", "river"]);
 const BOARD_SLOTS = ["First flop card", "Second flop card", "Third flop card", "Turn card", "River card"];
@@ -10,6 +12,8 @@ const BOARD_SLOTS = ["First flop card", "Second flop card", "Third flop card", "
 export interface SeatInfo {
   name: string;
   character: Character;
+  /** Short wallet address, so players can tell who's who. */
+  address?: string;
 }
 
 interface FeltProps {
@@ -30,15 +34,31 @@ function seatState(game: GameView, seat: 0 | 1, lastResult: HandResult | null): 
   return "idle";
 }
 
-function SeatPlate({ info, stack, state, dealer }: { info: SeatInfo; stack: number; state: SeatState; dealer: boolean }) {
+function SeatPlate({ info, stack, state, dealer, mine }: { info: SeatInfo; stack: number; state: SeatState; dealer: boolean; mine: boolean }) {
   return (
-    <div className="flex items-center gap-3 rounded-full bg-ink/70 py-2 pr-4 pl-2">
-      <SeatAvatar who={info.character} size={52} state={state} />
-      <div className="flex flex-col gap-0.5">
-        <span className="text-[15px] font-semibold">{info.name}</span>
-        <span className="font-mono text-sm text-muted-foreground tabular-nums">{stack} chips</span>
+    <div className="flex flex-col items-center gap-2">
+      <div
+        className={cn(
+          "flex items-center gap-3 rounded-full bg-ink/70 py-2 pr-4 pl-2 ring-2 ring-transparent transition-shadow",
+          state === "turn" && (mine ? "ring-brass" : "ring-river"),
+        )}
+      >
+        <SeatAvatar who={info.character} size={52} state={state} />
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[15px] font-semibold">
+            {info.name}
+            {info.address && <span className="ml-2 font-mono text-xs font-normal text-muted-foreground">{info.address}</span>}
+          </span>
+          <span className="font-mono text-sm text-muted-foreground tabular-nums">{stack} chips</span>
+        </div>
+        {dealer && <DealerButton />}
       </div>
-      {dealer && <DealerButton />}
+      {state === "turn" &&
+        (mine ? (
+          <Badge variant="brass" size="lg" className="font-semibold">Your turn</Badge>
+        ) : (
+          <Badge variant="river" size="lg" className="font-semibold">{info.name} is thinking…</Badge>
+        ))}
     </div>
   );
 }
@@ -73,7 +93,7 @@ export function Felt({ game, hand, me, seats, lastResult }: FeltProps) {
               </>
             )}
           </div>
-          <SeatPlate info={seats[opp]} stack={game.stacks[opp]} state={seatState(game, opp, lastResult)} dealer={game.dealer === opp} />
+          <SeatPlate info={seats[opp]} stack={game.stacks[opp]} state={seatState(game, opp, lastResult)} dealer={game.dealer === opp} mine={false} />
         </div>
         {game.bets[opp] > 0 && <BetPill amount={game.bets[opp]} />}
       </div>
@@ -96,7 +116,7 @@ export function Felt({ game, hand, me, seats, lastResult }: FeltProps) {
       <div className="flex flex-col items-center gap-3">
         {game.bets[me] > 0 && <BetPill amount={game.bets[me]} />}
         <div className="flex flex-wrap items-end justify-center gap-5">
-          <SeatPlate info={seats[me]} stack={game.stacks[me]} state={seatState(game, me, lastResult)} dealer={game.dealer === me} />
+          <SeatPlate info={seats[me]} stack={game.stacks[me]} state={seatState(game, me, lastResult)} dealer={game.dealer === me} mine />
           <div className="flex flex-col items-center gap-2.5">
             <div className="flex gap-2">
               {myCards ? (

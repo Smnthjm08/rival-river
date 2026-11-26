@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { HourglassIcon, ShuffleIcon, TrophyIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import { MatchSidebar } from "@/components/rr/table/match-sidebar";
 import { useSecondsLeft } from "@/components/rr/table-pieces";
 import { useMatch } from "@/hooks/use-match";
 import { formatUsdc } from "@/hooks/use-usdc-balance";
-import { refundOpensAt, type GameView, type Seat, type TableView } from "@/lib/rival";
+import { refundOpensAt, undelegate, type GameView, type Seat, type TableView } from "@/lib/rival";
 
 const BETTING = new Set(["preflop", "flop", "turn", "river"]);
 
@@ -26,13 +26,15 @@ interface LiveTableProps {
   onRefund: () => void;
   /** Called with each new snapshot, so the page header can show the hand and blinds. */
   onGame: (g: GameView) => void;
+  /** The TEE refused this tab's login: the player has to sign in again. */
+  onAuthLost: () => void;
 }
 
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
 /** The table while the game is on the rollup: felt, actions, and the side panel. */
-export function LiveTable({ seat, table, seats, busy, onCollect, onRefund, onGame }: LiveTableProps) {
-  const { game, hand, lastResult, results, act, acting } = useMatch(seat);
+export function LiveTable({ seat, table, seats, busy, onCollect, onRefund, onGame, onAuthLost }: LiveTableProps) {
+  const { game, hand, lastResult, results, act, acting } = useMatch(seat, onAuthLost);
   const me = seat.seat;
   const opp = (1 - me) as 0 | 1;
   const pastDeadline = useSecondsLeft(game?.matchDeadline ?? null) === 0;
@@ -41,6 +43,18 @@ export function LiveTable({ seat, table, seats, busy, onCollect, onRefund, onGam
   useEffect(() => {
     if (game) onGame(game);
   }, [game, onGame]);
+
+  // Match over: the session key brings the game back to Solana (no prompt),
+  // so collecting is just the payout. Both tabs may; the second one waits.
+  const returning = useRef(false);
+  useEffect(() => {
+    if (game?.phase !== "finished" || returning.current) return;
+    returning.current = true;
+    undelegate(seat.session, seat).catch((e) => {
+      console.warn("[rival] undelegate with the session key failed; Collect will retry with the wallet", e);
+      returning.current = false;
+    });
+  }, [game?.phase, seat]);
 
   if (!game) {
     return (

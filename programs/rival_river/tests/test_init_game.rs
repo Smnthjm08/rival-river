@@ -43,9 +43,14 @@ fn send(svm: &mut LiteSVM, signer: &Keypair, ix: Instruction) -> bool {
     ok
 }
 
+/// Session keys both players name when they stake.
+fn session_keys() -> [Pubkey; 2] {
+    [Pubkey::new_from_array([7; 32]), Pubkey::new_from_array([8; 32])]
+}
+
 /// Creates table #1 for `creator`. With `join`, an opponent also stakes, so
-/// the table is Locked and ready for init_game.
-fn create_table(svm: &mut LiteSVM, creator: &Keypair, join: bool) -> Pubkey {
+/// the table is Locked and ready for init_game. Returns the table and the opponent.
+fn create_table(svm: &mut LiteSVM, creator: &Keypair, join: bool) -> (Pubkey, Keypair) {
     let mint = create_mint(svm);
     let opponent = Keypair::new();
     svm.airdrop(&opponent.pubkey(), 1_000_000_000).unwrap();
@@ -60,6 +65,7 @@ fn create_table(svm: &mut LiteSVM, creator: &Keypair, join: bool) -> Pubkey {
             table_id: 1,
             opponent: opponent.pubkey(),
             stake: STAKE,
+            session_key: session_keys()[0],
         }
         .data(),
         rival_river::accounts::CreateTable {
@@ -78,7 +84,7 @@ fn create_table(svm: &mut LiteSVM, creator: &Keypair, join: bool) -> Pubkey {
     if join {
         let ix = Instruction::new_with_bytes(
             rival_river::id(),
-            &rival_river::instruction::JoinTable {}.data(),
+            &rival_river::instruction::JoinTable { session_key: session_keys()[1] }.data(),
             rival_river::accounts::JoinTable {
                 opponent: opponent.pubkey(),
                 table,
@@ -91,7 +97,7 @@ fn create_table(svm: &mut LiteSVM, creator: &Keypair, join: bool) -> Pubkey {
         );
         assert!(send(svm, &opponent, ix));
     }
-    table
+    (table, opponent)
 }
 
 fn read_table(svm: &LiteSVM, table: Pubkey) -> Table {
@@ -105,7 +111,7 @@ fn init_game(svm: &mut LiteSVM, signer: &Keypair, table: Pubkey) -> bool {
         rival_river::id(),
         &rival_river::instruction::InitGame {}.data(),
         rival_river::accounts::InitGame {
-            creator: signer.pubkey(),
+            payer: signer.pubkey(),
             table,
             game,
             deck: pda(&[DECK_SEED, game.as_ref()]),
@@ -121,7 +127,7 @@ fn init_game(svm: &mut LiteSVM, signer: &Keypair, table: Pubkey) -> bool {
 #[test]
 fn creator_opens_game_for_their_table() {
     let (mut svm, creator) = setup();
-    let table = create_table(&mut svm, &creator, true);
+    let (table, _) = create_table(&mut svm, &creator, true);
 
     assert!(init_game(&mut svm, &creator, table));
     assert_eq!(read_table(&svm, table).status, TableStatus::InPlay);
@@ -136,6 +142,7 @@ fn creator_opens_game_for_their_table() {
     assert_eq!((game.bets, game.pot), ([0, 0], 0));
     assert_eq!(game.phase, Phase::Waiting);
     assert_eq!(game.winner, None);
+    assert_eq!(game.session_keys, session_keys(), "session keys named at stake time");
 
     let account = svm
         .get_account(&pda(&[DECK_SEED, game_key.as_ref()]))
@@ -159,7 +166,7 @@ fn creator_opens_game_for_their_table() {
 #[test]
 fn only_one_game_per_table() {
     let (mut svm, creator) = setup();
-    let table = create_table(&mut svm, &creator, true);
+    let (table, _) = create_table(&mut svm, &creator, true);
 
     assert!(init_game(&mut svm, &creator, table));
     assert!(!init_game(&mut svm, &creator, table));
@@ -168,7 +175,7 @@ fn only_one_game_per_table() {
 #[test]
 fn stranger_cannot_open_game() {
     let (mut svm, creator) = setup();
-    let table = create_table(&mut svm, &creator, true);
+    let (table, _) = create_table(&mut svm, &creator, true);
     let stranger = Keypair::new();
     svm.airdrop(&stranger.pubkey(), 1_000_000_000).unwrap();
 
@@ -178,9 +185,27 @@ fn stranger_cannot_open_game() {
 #[test]
 fn game_needs_both_stakes() {
     let (mut svm, creator) = setup();
-    let table = create_table(&mut svm, &creator, false);
+    let (table, _) = create_table(&mut svm, &creator, false);
     assert!(
         !init_game(&mut svm, &creator, table),
         "opponent hasn't joined"
     );
+}
+
+#[test]
+fn opponent_can_open_the_game_and_is_paid_back() {
+    let (mut svm, creator) = setup();
+    let (table, opponent) = create_table(&mut svm, &creator, true);
+    let lamports = |svm: &LiteSVM, k: &Keypair| svm.get_account(&k.pubkey()).unwrap().lamports;
+    let (creator_before, opponent_before) = (lamports(&svm, &creator), lamports(&svm, &opponent));
+
+    assert!(init_game(&mut svm, &opponent, table));
+    assert_eq!(read_table(&svm, table).status, TableStatus::InPlay);
+    // The creator pre-paid the rent in create_table: the opponent only pays
+    // the transaction fee, and the creator pays nothing more.
+    assert_eq!(opponent_before - lamports(&svm, &opponent), 5_000);
+    assert_eq!(lamports(&svm, &creator), creator_before);
+    // The Table is left with exactly its own rent.
+    let account = svm.get_account(&table).unwrap();
+    assert_eq!(account.lamports, svm.minimum_balance_for_rent_exemption(account.data.len()));
 }

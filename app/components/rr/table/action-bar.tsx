@@ -73,11 +73,11 @@ export function ActionBar({ game, me, opponentName, acting, onAct }: ActionBarPr
   ];
 
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-[1.25rem] bg-card p-4">
+    <div className="flex flex-wrap items-center gap-3 rounded-[1.25rem] bg-card p-4 ring-2 ring-brass/70">
       <div className="mr-2 flex items-center gap-2.5">
         <TurnTimer secondsLeft={secondsLeft} total={TURN_SECONDS} />
         <div className="flex flex-col">
-          <span className="text-[15px] font-semibold">Your turn</span>
+          <span className="text-[15px] font-semibold text-brass">Your turn</span>
           <span className="text-[13px] text-muted-foreground">{secondsLeft} s left</span>
         </div>
       </div>

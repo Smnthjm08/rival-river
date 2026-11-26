@@ -11,19 +11,23 @@ use crate::state::{Deck, Game, Hand, Phase, Table, TableStatus};
 
 #[derive(Accounts)]
 pub struct InitGame<'info> {
-    #[account(mut)]
-    pub creator: Signer<'info>,
+    /// Either player: the app has the opponent send it with join_table, so
+    /// the match starts without the creator coming back. Paid back from the
+    /// rent the creator pre-paid into the Table.
+    #[account(
+        mut,
+        constraint = payer.key() == table.creator || payer.key() == table.opponent
+            @ ErrorCode::NotAPlayer,
+    )]
+    pub payer: Signer<'info>,
 
-    /// `has_one = creator` checks table.creator == creator.key(),
-    /// so only the table's creator can open its game. Only once both stakes
-    /// are in the vault.
-    #[account(mut, has_one = creator,
-              constraint = table.status == TableStatus::Locked @ ErrorCode::TableNotLocked)]
+    /// Only once both stakes are in the vault.
+    #[account(mut, constraint = table.status == TableStatus::Locked @ ErrorCode::TableNotLocked)]
     pub table: Account<'info, Table>,
 
     #[account(
         init,
-        payer = creator,
+        payer = payer,
         space = 8 + Game::INIT_SPACE,
         seeds = [GAME_SEED, table.key().as_ref()],
         bump,
@@ -32,7 +36,7 @@ pub struct InitGame<'info> {
 
     #[account(
         init,
-        payer = creator,
+        payer = payer,
         space = 8 + Deck::INIT_SPACE,
         seeds = [DECK_SEED, game.key().as_ref()],
         bump,
@@ -41,7 +45,7 @@ pub struct InitGame<'info> {
 
     #[account(
         init,
-        payer = creator,
+        payer = payer,
         space = 8 + Hand::INIT_SPACE,
         seeds = [HAND_SEED, game.key().as_ref(), table.creator.as_ref()],
         bump,
@@ -50,7 +54,7 @@ pub struct InitGame<'info> {
 
     #[account(
         init,
-        payer = creator,
+        payer = payer,
         space = 8 + Hand::INIT_SPACE,
         seeds = [HAND_SEED, game.key().as_ref(), table.opponent.as_ref()],
         bump,
@@ -76,7 +80,7 @@ pub fn init_game_handler(ctx: Context<InitGame>) -> Result<()> {
     ctx.accounts.game.set_inner(Game {
         table: table.key(),
         players: [table.creator, table.opponent],
-        session_keys: [Pubkey::default(); 2],
+        session_keys: table.session_keys,
         hand_number: 0,
         permissions_ready: false,
         stacks: [STARTING_STACK; 2],
@@ -120,7 +124,7 @@ pub fn init_game_handler(ctx: Context<InitGame>) -> Result<()> {
 
     // On the private rollup each account pays rent for its own permission.
     // Send the lamports now; they travel with the account when delegated.
-    let permission_rent = rent(EphemeralPermission::size_of(MAX_PERMISSION_MEMBERS) as u32);
+    let permission_rent = permission_rent();
     let accounts = [
         ctx.accounts.game.to_account_info(),
         ctx.accounts.deck.to_account_info(),
@@ -132,12 +136,32 @@ pub fn init_game_handler(ctx: Context<InitGame>) -> Result<()> {
             CpiContext::new(
                 ctx.accounts.system_program.key(),
                 Transfer {
-                    from: ctx.accounts.creator.to_account_info(),
+                    from: ctx.accounts.payer.to_account_info(),
                     to,
                 },
             ),
             permission_rent,
         )?;
     }
+
+    // Pay back what this cost (create_table put it in the Table). The Table
+    // is ours, so it can be debited directly; it stays rent-exempt.
+    let cost = game_rent()?;
+    **ctx.accounts.table.to_account_info().try_borrow_mut_lamports()? -= cost;
+    **ctx.accounts.payer.to_account_info().try_borrow_mut_lamports()? += cost;
     Ok(())
+}
+
+fn permission_rent() -> u64 {
+    rent(EphemeralPermission::size_of(MAX_PERMISSION_MEMBERS) as u32)
+}
+
+/// Lamports init_game spends: rent for Game, Deck and both Hands, plus each
+/// one's permission rent on the rollup. create_table pre-pays it.
+pub fn game_rent() -> Result<u64> {
+    let r = Rent::get()?;
+    Ok(r.minimum_balance(8 + Game::INIT_SPACE)
+        + r.minimum_balance(8 + Deck::INIT_SPACE)
+        + 2 * r.minimum_balance(8 + Hand::INIT_SPACE)
+        + 4 * permission_rent())
 }

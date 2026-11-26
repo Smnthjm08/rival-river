@@ -1,6 +1,7 @@
 //! Rollup tests. MagicSVM runs Solana ("Base") and the ephemeral rollup
 //! ("Ephemeral") in one process, so delegation can be tested without validators.
-//! Run with `cargo +stable test` from this folder, after `anchor build`.
+//! Run with `cargo test` from this folder (rust-toolchain.toml picks the
+//! newer rustc), after `anchor build -- --features localnet`.
 use {
     anchor_lang::{prelude::Pubkey, system_program, AccountDeserialize, Id, InstructionData, ToAccountMetas},
     ephemeral_rollups_sdk::{
@@ -84,8 +85,14 @@ struct Setup {
 }
 
 /// Creates a table between two funded players, and both stake: the table is
-/// Locked. Does NOT run init_game.
+/// Locked. Does NOT run init_game. No session keys named at stake time.
 fn setup() -> Setup {
+    setup_with([Pubkey::default(); 2])
+}
+
+/// setup(), with each player naming a session key when they stake
+/// ([creator's, opponent's]), as the app does.
+fn setup_with(sessions: [Pubkey; 2]) -> Setup {
     let mut svm = MagicSVM::new();
     svm.add_program_from_file(addr(rival_river::id()), SO).unwrap();
     let creator = Keypair::new();
@@ -104,7 +111,7 @@ fn setup() -> Setup {
     }
     let vault = ata(table, mint);
     assert!(send(&mut svm, Base, &creator, ix(
-        instruction::CreateTable { table_id: 1, opponent: key(&opponent), stake: STAKE },
+        instruction::CreateTable { table_id: 1, opponent: key(&opponent), stake: STAKE, session_key: sessions[0] },
         accounts::CreateTable {
             creator: key(&creator),
             table,
@@ -117,7 +124,7 @@ fn setup() -> Setup {
         },
     )));
     assert!(send(&mut svm, Base, &opponent, ix(
-        instruction::JoinTable {},
+        instruction::JoinTable { session_key: sessions[1] },
         accounts::JoinTable {
             opponent: key(&opponent),
             table,
@@ -186,11 +193,15 @@ fn balance(svm: &MagicSVM, account: Pubkey) -> Option<u64> {
 }
 
 fn init_game(s: &mut Setup) {
-    let creator = key(&s.creator);
-    assert!(send(&mut s.svm, Base, &s.creator, ix(
+    let creator = s.creator.insecure_clone();
+    init_game_by(s, &creator);
+}
+
+fn init_game_by(s: &mut Setup, signer: &Keypair) {
+    assert!(send(&mut s.svm, Base, signer, ix(
         instruction::InitGame {},
         accounts::InitGame {
-            creator,
+            payer: key(signer),
             table: s.table,
             game: s.game,
             deck: s.deck,
@@ -1684,7 +1695,7 @@ fn init_game_err(s: &mut Setup) -> Option<String> {
     let ix = ix(
         instruction::InitGame {},
         accounts::InitGame {
-            creator: key(&creator),
+            payer: key(&creator),
             table: s.table,
             game: s.game,
             deck: s.deck,
@@ -1947,4 +1958,66 @@ fn unfinished_match_refunds_only_after_the_grace() {
     assert_eq!(refund(&mut s).as_deref(), Some("RefundTooEarly"));
     advance_clock(&mut s, 1);
     assert_eq!(refund(&mut s), None);
+}
+
+// ---- Session keys named at stake time -------------------------------------------
+
+/// What the app does: both name a session key when they stake, the opponent
+/// opens and delegates the game. Returns [creator's, opponent's] session keys.
+fn staked_sessions() -> (Setup, [Keypair; 2]) {
+    let sessions = [Keypair::new(), Keypair::new()];
+    let mut s = setup_with([key(&sessions[0]), key(&sessions[1])]);
+    let opponent = s.opponent.insecure_clone();
+    init_game_by(&mut s, &opponent);
+    assert!(delegate_game(&mut s, &opponent));
+    (s, sessions)
+}
+
+#[test]
+fn stake_time_session_keys_are_in_the_game() {
+    let (s, [c, o]) = staked_sessions();
+    assert_eq!(read_game(&s.svm, Ephemeral, s.game).session_keys, [key(&c), key(&o)]);
+}
+
+#[test]
+fn session_key_makes_the_table_private_and_can_read_its_own_hand() {
+    let (mut s, [c, o]) = staked_sessions();
+    assert!(init_permissions(&mut s, &c), "an unfunded session key can send init_permissions");
+    let (cw, ow) = (key(&s.creator), key(&s.opponent));
+    let (cs, os) = (key(&c), key(&o));
+    assert_eq!(readers(&s.svm, s.game), (true, vec![cw, cs, ow, os], false));
+    assert_eq!(readers(&s.svm, s.deck), (true, vec![], false));
+    assert_eq!(readers(&s.svm, s.hand_creator), (true, vec![cw, cs], false));
+    assert_eq!(readers(&s.svm, s.hand_opponent), (true, vec![ow, os], false));
+
+    // Signed in as the session key, the tab reads Game and only its own Hand.
+    let (game, deck, hand_c, hand_o) = (s.game, s.deck, s.hand_creator, s.hand_opponent);
+    let mut can_read = |viewer: Pubkey, account: Pubkey| {
+        s.svm.set_authorized_user(Some(addr(viewer)));
+        s.svm.get_account_for(Ephemeral, &addr(account)).is_some()
+    };
+    assert!(can_read(cs, game) && can_read(cs, hand_c));
+    assert!(!can_read(cs, hand_o) && !can_read(cs, deck));
+    assert!(can_read(os, hand_o) && !can_read(os, hand_c));
+}
+
+#[test]
+fn session_key_brings_the_finished_game_back() {
+    let (mut s, [c, _]) = staked_sessions();
+    assert!(init_permissions(&mut s, &c));
+    assert!(start_hand(&mut s, &c));
+    let early = undelegate_game_ix(&s, &c);
+    assert_eq!(error_name(&mut s.svm, Ephemeral, &c, &[early]).as_deref(), Some("MatchNotFinished"));
+    force_finish(&mut s);
+    assert!(undelegate_game(&mut s, &c));
+    assert_eq!(owner(&s.svm, Base, s.game), rival_river::id());
+}
+
+#[test]
+fn stranger_session_cannot_make_permissions_or_undelegate() {
+    let (mut s, _) = staked_sessions();
+    let stranger = Keypair::new();
+    assert!(!init_permissions(&mut s, &stranger));
+    force_finish(&mut s);
+    assert!(!undelegate_game(&mut s, &stranger));
 }

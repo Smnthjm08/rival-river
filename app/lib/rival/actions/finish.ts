@@ -1,6 +1,7 @@
 //! After the match: bring the game back to Solana and pay the winner.
 //! Both players' tabs may run this at the same time; whichever lands second
 //! finds the work done and returns quietly.
+import type { Keypair } from "@solana/web3.js";
 import { createAssociatedTokenAccountIdempotentInstruction, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { PROGRAM_ID, USDC_MINT } from "../config";
 import { base, waitFor } from "../chain/connection";
@@ -25,16 +26,17 @@ const backOnSolana = async (keys: MatchKeys) => {
 const tableClosed = async (keys: MatchKeys) => !(await base.getAccountInfo(keys.table));
 
 /**
- * Brings the game back from the rollup (a player's wallet, once the match is
- * Finished or past its deadline). Returns once it's on Solana, or already
- * settled. If the other tab already sent it, waits for theirs instead of failing.
+ * Brings the game back from the rollup, once the match is Finished or past
+ * its deadline. Signed by a player's session key (no prompt) or wallet.
+ * Returns once it's on Solana, or already settled. If the other tab already
+ * sent it, waits for theirs instead of failing.
  */
-export async function undelegate(wallet: WalletSigner, s: Pick<Seat, "keys" | "tee">): Promise<void> {
+export async function undelegate(signer: Keypair | WalletSigner, s: Pick<Seat, "keys" | "tee">): Promise<void> {
   const { keys } = s;
   if (await backOnSolana(keys)) return;
-  const ix = await m.undelegateGame().accountsPartial({ payer: wallet.publicKey, ...rollupAccounts(keys), ...permissionAccounts(keys) }).instruction();
+  const ix = await m.undelegateGame().accountsPartial({ payer: signer.publicKey, ...rollupAccounts(keys), ...permissionAccounts(keys) }).instruction();
   try {
-    await sendTx({ conn: s.tee, ixs: [ix] }, wallet);
+    await sendTx({ conn: s.tee, ixs: [ix] }, signer);
   } catch (e) {
     // The program refused (e.g. MatchNotFinished): nothing to wait for.
     if (programErrorName(e)) throw e;
@@ -46,14 +48,23 @@ export async function undelegate(wallet: WalletSigner, s: Pick<Seat, "keys" | "t
 /**
  * Either player (or anyone, for settle) once the match is Finished: brings
  * the game back to Solana and pays both stakes to the winner, creating their
- * USDC account if needed. Up to two wallet prompts; safe to retry and to run
- * from both tabs. Returns the settle signature, or null if it was already
- * settled (by the other tab, or an earlier try).
+ * USDC account if needed. With the seat's session key, the only wallet
+ * prompt is the payout; safe to retry and to run from both tabs. Returns the
+ * settle signature, or null if it was already settled (by the other tab, or
+ * an earlier try).
  */
-export async function finishMatch(wallet: WalletSigner, s: Pick<Seat, "keys" | "tee">): Promise<string | null> {
+export async function finishMatch(wallet: WalletSigner, s: Pick<Seat, "keys" | "tee"> & { session?: Keypair }): Promise<string | null> {
   const { keys } = s;
   if (await tableClosed(keys)) return null;
-  await undelegate(wallet, s);
+  if (s.session) {
+    // The session key normally does it with no prompt; the wallet is the fallback.
+    await undelegate(s.session, s).catch((e) => {
+      if (programErrorName(e) === "MatchNotFinished") throw e;
+      return undelegate(wallet, s);
+    });
+  } else {
+    await undelegate(wallet, s);
+  }
   const game = await fetchGame(base, keys.game);
   if (!game) return null; // settle closed it between our checks
   if (game.winner == null) throw new TxError("The match has no winner yet", "MatchNotFinished");

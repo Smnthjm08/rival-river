@@ -1,6 +1,7 @@
 // Plays one match on devnet through lib/rival, the way two browser tabs
 // would: both players' clients run their loops at the same time, so they
-// race to send the automatic steps. Counts each wallet's signing prompts.
+// race to send the automatic steps. Counts each wallet's signing prompts:
+// expected 1 each (create; join) plus the payout for whoever settles.
 //
 //   cd app && bun scripts/lib-smoke.ts
 //
@@ -16,8 +17,8 @@ import {
 import { existsSync, readFileSync } from "fs";
 import { homedir } from "os";
 import {
-  base, createTable, enterRollup, fetchHand, fetchMatch, finishMatch, HandTracker, joinTable, keypairWallet, moves,
-  programErrorName, runSteps, sendTx, startMatch, USDC_MINT, waitForRollup, type Action, type Seat, type WalletSigner,
+  base, canSitSilently, createTable, enterRollup, fetchHand, fetchMatch, fetchTable, finishMatch, HandTracker, joinTable,
+  keypairWallet, moves, programErrorName, runSteps, sendTx, USDC_MINT, waitForRollup, type Action, type Seat, type WalletSigner,
 } from "../lib/rival";
 
 const STAKE = 10_000; // 0.01 USDC each
@@ -100,16 +101,17 @@ async function main() {
   await sendTx({ conn: base, ixs: fund }, load(`${homedir()}/.config/solana/id.json`));
   C.prompts.length = 0;
 
-  console.log("[1] lobby");
+  console.log("[1] lobby: create, then join (which also starts the match)");
   const keys = await createTable(C.wallet, O.wallet.publicKey, STAKE);
   console.log(`  table ${keys.table.toBase58()}`);
-  await joinTable(O.wallet, keys);
-  await startMatch(C.wallet, keys);
+  console.log(`  join + init_game + delegate: ${await joinTable(O.wallet, keys)}`);
   await waitForRollup(keys);
 
-  console.log("[2] both players enter the rollup at once");
-  const [sc, so] = await Promise.all([enterRollup(C.wallet, keys), enterRollup(O.wallet, keys)]);
-  const peek = await fetchHand(sc.tee, keys.handOpponent);
+  console.log("[2] both players sit down at once, with their stake-time session keys");
+  const table = (await fetchTable(base, keys.table))!;
+  console.log(`  silent for creator: ${canSitSilently(table, C.wallet.publicKey)}, opponent: ${canSitSilently(table, O.wallet.publicKey)}`);
+  const [sc, so] = await Promise.all([enterRollup(C.wallet, table), enterRollup(O.wallet, table)]);
+  const peek = await fetchHand(sc.tee, keys.handOpponent).catch(() => null);
   console.log(`  creator reading the opponent's Hand: ${peek === null ? "refused (good)" : "READABLE (bad)"}`);
 
   console.log("[3] play (both loops racing)");
@@ -121,6 +123,7 @@ async function main() {
   const winner = final.winner!;
   const winnerUsdc = usdc(winner === 0 ? C.wallet : O.wallet);
   const before = Number((await getAccount(base, winnerUsdc)).amount);
+  // As the UI does: each tab's session key undelegates, the wallet only settles.
   const sigs = await Promise.all([finishMatch(C.wallet, sc), finishMatch(O.wallet, so)]);
   console.log(`  settle signatures: creator ${sigs[0] ?? "null (already settled)"}, opponent ${sigs[1] ?? "null (already settled)"}`);
   const gained = Number((await getAccount(base, winnerUsdc)).amount) - before;

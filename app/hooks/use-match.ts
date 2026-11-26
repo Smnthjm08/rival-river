@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchMatch, HandTracker, moves, runSteps, type Action, type GameView, type HandResult, type HandView, type Seat } from "@/lib/rival";
+import { fetchMatch, HandTracker, isTeeAuthError, moves, runSteps, type Action, type GameView, type HandResult, type HandView, type Seat } from "@/lib/rival";
 
 export interface MatchState {
   game: GameView | null;
@@ -17,13 +17,18 @@ const resultsKey = (s: Seat) => `rr:results:${s.keys.game.toBase58()}`;
 /**
  * Live match on the rollup for one seat: polls Game and your Hand, sends the
  * automatic steps (start hand, secret, shuffle, timeout claims) through the
- * session key, and exposes `act` for fold / check / call / raise.
+ * session key, and exposes `act` for fold / check / call / raise. If the TEE
+ * refuses the login token, polling stops and `onAuthLost` is called.
  */
-export function useMatch(seat: Seat | null, everyMs = 800) {
+export function useMatch(seat: Seat | null, onAuthLost?: () => void, everyMs = 800) {
   const [state, setState] = useState<MatchState>({ game: null, hand: null, lastResult: null, results: [] });
   const [acting, setActing] = useState(false);
   const tracker = useRef<HandTracker | null>(null);
   const running = useRef(false);
+  const authLost = useRef(onAuthLost);
+  useEffect(() => {
+    authLost.current = onAuthLost;
+  });
 
   useEffect(() => {
     if (!seat) return;
@@ -54,6 +59,11 @@ export function useMatch(seat: Seat | null, everyMs = 800) {
           }
         }
       } catch (e) {
+        if (isTeeAuthError(e)) {
+          stop = true;
+          authLost.current?.();
+          return;
+        }
         console.warn("[rival] poll failed", e);
       }
       if (!stop) timer = setTimeout(tick, everyMs);

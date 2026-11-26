@@ -17,8 +17,8 @@ const c = (s: string) => card(id(s[0], s[1]));
 
 const keys = matchKeys(new PublicKey("963u7LYi6ojoCDht8eUdurft6hSHjWzRwNb3po8CZUZj"), new PublicKey("7DtDjtnmGy7EigcqWjXkr86or1BddwSu38CqvT64MA1K"), new BN(1));
 const seats: [SeatInfo, SeatInfo] = [
-  { name: "You", character: "heron" },
-  { name: "The Otter", character: "otter" },
+  { name: "You", character: "heron", address: "963u…ZUZj" },
+  { name: "The Otter", character: "otter", address: "7DtD…MA1K" },
 ];
 const results: HandResult[] = [
   { handNumber: 1, board: [], shown: null, stacks: [105, 95], won: [5, -5] },
@@ -56,6 +56,11 @@ export function TablePreview() {
   return (
     <>
       <SiteHeader>
+        {toAct === 0 ? (
+          <Badge variant="brass" size="lg" className="font-semibold">Your turn</Badge>
+        ) : (
+          <Badge variant="river" size="lg" className="font-semibold">The Otter’s turn</Badge>
+        )}
         <Badge variant="rail" size="lg" className="font-semibold">Hand 3 of 6</Badge>
         <Badge variant="rail" size="lg">Blinds <span className="font-mono font-semibold">20 / 40</span></Badge>
         <Badge variant="river" size="lg" className="font-semibold"><LockIcon />Private rollup</Badge>

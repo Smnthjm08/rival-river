@@ -17,10 +17,15 @@ use crate::state::{Deck, Game, Hand};
 ///   creator Hand  creator only
 ///   opponent Hand opponent only
 ///
+/// "A player" is their wallet and, if set by now, their session key: the
+/// tab can then sign in to the rollup with it, without a wallet prompt. A
+/// session key set later isn't added; that tab signs in with the wallet.
+///
 /// Without a permission, an account on the private rollup is public.
+/// Any player's wallet or session key can send it.
 #[derive(Accounts)]
 pub struct InitPermissions<'info> {
-    #[account(mut, constraint = game.players.contains(&payer.key()) @ ErrorCode::NotAPlayer)]
+    #[account(mut, constraint = game.seat_of(&payer.key()).is_some() @ ErrorCode::NotAPlayer)]
     pub payer: Signer<'info>,
 
     #[account(mut, seeds = [GAME_SEED, game.table.as_ref()], bump = game.bump)]
@@ -86,10 +91,22 @@ fn data_reader(pubkey: Pubkey) -> Member {
     Member { flags: 0, pubkey }
 }
 
+/// A seat's wallet, then its session key if it has a distinct one.
+fn keys_of(game: &Game, seat: usize) -> Vec<Pubkey> {
+    let (wallet, session) = (game.players[seat], game.session_keys[seat]);
+    if session == Pubkey::default() || session == wallet {
+        vec![wallet]
+    } else {
+        vec![wallet, session]
+    }
+}
+
 pub fn init_permissions_handler(ctx: Context<InitPermissions>) -> Result<()> {
     let a = &ctx.accounts;
     let game_key = a.game.key();
     let [creator, opponent] = a.game.players;
+    let (creator_keys, opponent_keys) = (keys_of(&a.game, 0), keys_of(&a.game, 1));
+    let both = creator_keys.iter().chain(&opponent_keys);
 
     // (account, its permission, its PDA seeds, readers)
     let game_bump = [a.game.bump];
@@ -101,7 +118,7 @@ pub fn init_permissions_handler(ctx: Context<InitPermissions>) -> Result<()> {
             a.game.to_account_info(),
             a.game_permission.to_account_info(),
             &[GAME_SEED, a.game.table.as_ref(), &game_bump],
-            vec![data_reader(creator), data_reader(opponent)],
+            both.map(|&k| data_reader(k)).collect(),
         ),
         (
             a.deck.to_account_info(),
@@ -118,7 +135,7 @@ pub fn init_permissions_handler(ctx: Context<InitPermissions>) -> Result<()> {
                 creator.as_ref(),
                 &creator_bump,
             ],
-            vec![reader(creator)],
+            creator_keys.iter().map(|&k| reader(k)).collect(),
         ),
         (
             a.hand_opponent.to_account_info(),
@@ -129,7 +146,7 @@ pub fn init_permissions_handler(ctx: Context<InitPermissions>) -> Result<()> {
                 opponent.as_ref(),
                 &opponent_bump,
             ],
-            vec![reader(opponent)],
+            opponent_keys.iter().map(|&k| reader(k)).collect(),
         ),
     ];
 

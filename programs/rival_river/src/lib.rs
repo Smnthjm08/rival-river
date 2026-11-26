@@ -27,12 +27,13 @@ pub mod rival_river {
         table_id: u64,
         opponent: Pubkey,
         stake: u64,
+        session_key: Pubkey,
     ) -> Result<()> {
-        create_table::create_table_handler(ctx, table_id, opponent, stake)
+        create_table::create_table_handler(ctx, table_id, opponent, stake, session_key)
     }
 
-    pub fn join_table(ctx: Context<JoinTable>) -> Result<()> {
-        join_table::join_table_handler(ctx)
+    pub fn join_table(ctx: Context<JoinTable>, session_key: Pubkey) -> Result<()> {
+        join_table::join_table_handler(ctx, session_key)
     }
 
     pub fn cancel_table(ctx: Context<CancelTable>) -> Result<()> {

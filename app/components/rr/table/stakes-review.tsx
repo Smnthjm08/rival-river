@@ -6,6 +6,9 @@ import { cn } from "@/lib/utils";
 
 export type StepState = "done" | "now" | "later";
 
+type Seat = { name: string; character: Character; address?: string };
+const ROLES = ["Opened the table", "Invited"];
+
 /** Kit "Review the stakes": both seats, the pot, and where the match is. */
 export function StakesReview({
   seats,
@@ -13,7 +16,7 @@ export function StakesReview({
   opponentDeposited,
   steps,
 }: {
-  seats: [{ name: string; character: Character }, { name: string; character: Character }];
+  seats: [Seat, Seat];
   stake: number;
   opponentDeposited: boolean;
   steps: { label: string; state: StepState }[];
@@ -27,7 +30,13 @@ export function StakesReview({
             const seat = (
               <div key={s.name + i} className="flex flex-col items-center gap-2.5 text-center">
                 <SeatAvatar who={s.character} size={84} state={deposited ? "winner" : "idle"} />
-                <span className="font-semibold">{s.name}</span>
+                <span className="flex flex-col items-center">
+                  <span className="font-semibold">{s.name}</span>
+                  <span className="text-[13px] text-muted-foreground">
+                    {ROLES[i]}
+                    {s.address && <> · <span className="font-mono">{s.address}</span></>}
+                  </span>
+                </span>
                 <span className="font-mono text-xl text-brass">{formatUsdc(stake)} USDC</span>
                 {deposited ? (
                   <span className="flex items-center gap-1.5 text-[13px] text-river">

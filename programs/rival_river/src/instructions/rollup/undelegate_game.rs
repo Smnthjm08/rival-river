@@ -14,9 +14,11 @@ use crate::state::{Deck, Game, Hand, Phase};
 #[commit]
 #[derive(Accounts)]
 pub struct UndelegateGame<'info> {
+    /// A player's wallet or session key: the tab can bring the game back
+    /// without a wallet prompt.
     #[account(
         mut,
-        constraint = game.players.contains(&payer.key()) @ ErrorCode::NotAPlayer,
+        constraint = game.seat_of(&payer.key()).is_some() @ ErrorCode::NotAPlayer,
     )]
     pub payer: Signer<'info>,
 

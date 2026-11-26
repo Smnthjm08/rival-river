@@ -684,6 +684,10 @@ export type RivalRiver = {
         {
           "name": "stake",
           "type": "u64"
+        },
+        {
+          "name": "sessionKey",
+          "type": "pubkey"
         }
       ]
     },
@@ -1359,19 +1363,19 @@ export type RivalRiver = {
       ],
       "accounts": [
         {
-          "name": "creator",
+          "name": "payer",
+          "docs": [
+            "Either player: the app has the opponent send it with join_table, so",
+            "the match starts without the creator coming back. Paid back from the",
+            "rent the creator pre-paid into the Table."
+          ],
           "writable": true,
-          "signer": true,
-          "relations": [
-            "table"
-          ]
+          "signer": true
         },
         {
           "name": "table",
           "docs": [
-            "`has_one = creator` checks table.creator == creator.key(),",
-            "so only the table's creator can open its game. Only once both stakes",
-            "are in the vault."
+            "Only once both stakes are in the vault."
           ],
           "writable": true
         },
@@ -1968,7 +1972,12 @@ export type RivalRiver = {
           "name": "tokenProgram"
         }
       ],
-      "args": []
+      "args": [
+        {
+          "name": "sessionKey",
+          "type": "pubkey"
+        }
+      ]
     },
     {
       "name": "processUndelegation",
@@ -2833,6 +2842,10 @@ export type RivalRiver = {
       "accounts": [
         {
           "name": "payer",
+          "docs": [
+            "A player's wallet or session key: the tab can bring the game back",
+            "without a wallet prompt."
+          ],
           "writable": true,
           "signer": true
         },
@@ -3861,6 +3874,20 @@ export type RivalRiver = {
               "the end of the start window, init_game to the end of the match."
             ],
             "type": "i64"
+          },
+          {
+            "name": "sessionKeys",
+            "docs": [
+              "Each player's session key, [creator, opponent], named when they stake",
+              "(Pubkey::default() = none). init_game copies them into the Game, so",
+              "the browser tab that staked can play without another wallet prompt."
+            ],
+            "type": {
+              "array": [
+                "pubkey",
+                2
+              ]
+            }
           },
           {
             "name": "bump",

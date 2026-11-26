@@ -20,10 +20,11 @@ pub const DECK_SEED: &[u8] = b"deck";
 #[constant]
 pub const HAND_SEED: &[u8] = b"hand";
 
-/// Most members any of our permissions will ever list (Game: both players).
-/// Each delegated account is pre-funded for a permission this size in
-/// init_game, since it pays its own permission rent on the rollup.
-pub const MAX_PERMISSION_MEMBERS: usize = 2;
+/// Most members any of our permissions will ever list (Game: both players'
+/// wallets and session keys). Each delegated account is pre-funded for a
+/// permission this size in init_game, since it pays its own permission rent
+/// on the rollup.
+pub const MAX_PERMISSION_MEMBERS: usize = 4;
 
 /// The rollup validator Game, Deck and Hands are delegated to. It must be a
 /// private (TEE) validator: on any other, permissions aren't enforced and the

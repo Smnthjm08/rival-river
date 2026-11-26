@@ -65,6 +65,10 @@ fn send(svm: &mut LiteSVM, signer: &Keypair, ix: Instruction) -> bool {
 }
 
 fn create_table(s: &mut Setup, table_id: u64, opponent: Pubkey, stake: u64) -> bool {
+    create_table_with(s, table_id, opponent, stake, Pubkey::default())
+}
+
+fn create_table_with(s: &mut Setup, table_id: u64, opponent: Pubkey, stake: u64, session_key: Pubkey) -> bool {
     let creator = s.creator.pubkey();
     let table = table_pda(&creator, table_id);
     let ix = Instruction::new_with_bytes(
@@ -73,6 +77,7 @@ fn create_table(s: &mut Setup, table_id: u64, opponent: Pubkey, stake: u64) -> b
             table_id,
             opponent,
             stake,
+            session_key,
         }
         .data(),
         rival_river::accounts::CreateTable {
@@ -92,9 +97,13 @@ fn create_table(s: &mut Setup, table_id: u64, opponent: Pubkey, stake: u64) -> b
 }
 
 fn join_table(s: &mut Setup, signer: &Keypair, table: Pubkey) -> bool {
+    join_table_with(s, signer, table, Pubkey::default())
+}
+
+fn join_table_with(s: &mut Setup, signer: &Keypair, table: Pubkey, session_key: Pubkey) -> bool {
     let ix = Instruction::new_with_bytes(
         rival_river::id(),
-        &rival_river::instruction::JoinTable {}.data(),
+        &rival_river::instruction::JoinTable { session_key }.data(),
         rival_river::accounts::JoinTable {
             opponent: signer.pubkey(),
             table,
@@ -317,4 +326,20 @@ fn table_opens_even_if_someone_created_its_vault_first() {
     let opponent = s.opponent.pubkey();
     assert!(create_table(&mut s, 1, opponent, STAKE));
     assert_eq!(balance(&s.svm, vault), STAKE);
+}
+
+#[test]
+fn session_keys_are_named_when_staking() {
+    let mut s = setup();
+    let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    let (mine, theirs) = (Pubkey::new_unique(), Pubkey::new_unique());
+    assert!(!create_table_with(&mut s, 1, opponent.pubkey(), STAKE, opponent.pubkey()), "the other seat's wallet");
+    assert!(create_table_with(&mut s, 1, opponent.pubkey(), STAKE, mine));
+    let table = table_pda(&creator.pubkey(), 1);
+
+    // A key that already signs for the creator's seat is refused.
+    assert!(!join_table_with(&mut s, &opponent, table, mine));
+    assert!(!join_table_with(&mut s, &opponent, table, creator.pubkey()));
+    assert!(join_table_with(&mut s, &opponent, table, theirs));
+    assert_eq!(read_table(&s.svm, table).session_keys, [mine, theirs]);
 }

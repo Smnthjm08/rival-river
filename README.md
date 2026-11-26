@@ -7,13 +7,30 @@ stakes.
 
 ## How a match works
 
-1. Create a table, invite a friend, and choose the stake. Your USDC goes
-   into the table’s escrow.
-2. Your friend joins by putting in the same stake. Each player starts with
+1. Create a table: choose the stake and your friend’s wallet. Your USDC goes
+   into the table’s escrow, and you get an invite link. **One wallet
+   approval.**
+2. Your friend opens the link and matches the stake. The same transaction
+   creates the game and moves it to MagicBlock’s private rollup, so the
+   match starts right away. **One wallet approval.** Each player starts with
    100 virtual chips.
 3. Play up to six hands of heads-up Hold’em with a standard deck. Blinds rise
-   every hand so the match always finishes.
-4. Settle the match on Solana. The winner receives both stakes.
+   every hand so the match always finishes. **No wallet approvals:** each
+   browser tab plays with its own session key.
+4. The winner collects: the game comes back to Solana and both stakes are
+   paid out. **One wallet approval.**
+
+### Session keys
+
+When you stake, your browser tab makes a session key (kept in the tab’s
+`sessionStorage`) and names it in the same transaction. On the rollup that
+key can sign in to read the table and your own hole cards, make the table
+private, play your moves, and bring the finished game back to Solana. It
+can’t move any money: the stakes stay in an escrow on Solana that only the
+program can pay out, and only to the winner.
+
+If the tab is closed, a new tab asks for one signature to sign in and one
+approval to register a new key, then plays without approvals again.
 
 ## Match rules
 
@@ -44,7 +61,7 @@ Ephemeral Rollup:
 - The game account (bets, pot, community cards, whose turn it is) is
   readable by both players.
 - Each player’s hole cards live in a separate account that only that
-  player’s wallet can read.
+  player (their wallet or their session key) can read.
 - The undealt deck is readable by nobody.
 - The shuffle mixes MagicBlock VRF randomness with a secret from each
   player, so neither the oracle nor either player can work out the deck.
@@ -53,6 +70,36 @@ Ephemeral Rollup:
 
 Solana devnet handles the USDC escrow, refunds, and the payout to the
 winner.
+
+## Running it
+
+The program is deployed on devnet at
+`7XjxcXUqsLRzXWxdVa2TR2jmHXzNrTW1Z7neQGYii1gi` and delegates to MagicBlock’s
+devnet TEE validator. You need a devnet wallet (Phantom, Backpack, Solflare)
+with a little devnet SOL and USDC from [faucet.circle.com](https://faucet.circle.com).
+
+```sh
+cd app && bun install && bun dev      # http://localhost:3000
+```
+
+`/preview` shows the live table with sample data, no wallet needed.
+
+Tests:
+
+```sh
+anchor build -- --features localnet   # pins MagicSVM's validator, never deploy this build
+cargo test -p rival_river             # Solana-side instructions (LiteSVM)
+cd tests-magicsvm && cargo test       # rollup flow: delegation, permissions, VRF, play, settle
+```
+
+## Known limitations
+
+- Whether a player has sent this hand’s shuffle secret is only visible to
+  that player, so the other side can’t tell “waiting for their secret” from
+  “waiting for the oracle”. The 30-second timeout covers both.
+- Every rollup transaction is recorded even when the program refuses it
+  (the rollup doesn’t simulate first), so a refused move still shows up in
+  the explorer.
 
 ## MVP scope
 

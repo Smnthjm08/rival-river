@@ -33,10 +33,22 @@ pub struct JoinTable<'info> {
 }
 
 /// The opponent matches the creator's stake. Both stakes are now locked
-/// until the match is settled, or refunded if the creator doesn't start the
-/// game within START_SECONDS.
-pub fn join_table_handler(ctx: Context<JoinTable>) -> Result<()> {
+/// until the match is settled, or refunded if nobody starts the game within
+/// START_SECONDS. The app sends init_game and delegate_game right after, in
+/// the same wallet prompt.
+///
+/// `session_key` (or Pubkey::default() for none) will sign the opponent's
+/// moves on the rollup.
+pub fn join_table_handler(ctx: Context<JoinTable>, session_key: Pubkey) -> Result<()> {
     let a = &ctx.accounts;
+    // A key that already signs for the creator's seat would make it
+    // ambiguous whose move a signature is.
+    let creator_session = a.table.session_keys[0];
+    require!(
+        session_key != a.table.creator
+            && (session_key != creator_session || creator_session == Pubkey::default()),
+        ErrorCode::SessionKeyTaken
+    );
     escrow::deposit(
         &a.opponent,
         &a.opponent_token,
@@ -48,5 +60,6 @@ pub fn join_table_handler(ctx: Context<JoinTable>) -> Result<()> {
     let table = &mut ctx.accounts.table;
     table.status = TableStatus::Locked;
     table.deadline = Clock::get()?.unix_timestamp + START_SECONDS;
+    table.session_keys[1] = session_key;
     Ok(())
 }

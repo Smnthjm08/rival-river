@@ -1,0 +1,6 @@
+# MagicSVM's solana crates need a newer rustc than the program (pinned to
+# 1.89 at the repo root). Known good: 1.99.1. Lets `cargo test` here run
+# without `+stable`.
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"

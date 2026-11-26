@@ -224,7 +224,7 @@ async function main() {
     "solana",
     await send(base, [
       await program.methods
-        .createTable(tableId, opponent.publicKey, new BN(STAKE))
+        .createTable(tableId, opponent.publicKey, new BN(STAKE), PublicKey.default) // no stake-time session key: tests the wallet path
         .accountsPartial({ creator: creator.publicKey, table, creatorToken: creatorUsdc, vault, tokenProgram: TOKEN_PROGRAM_ID })
         .instruction(),
     ], [creator]),
@@ -234,7 +234,7 @@ async function main() {
     "solana",
     await send(base, [
       await program.methods
-        .joinTable()
+        .joinTable(PublicKey.default)
         .accountsPartial({ opponent: opponent.publicKey, table, mint: USDC, opponentToken: opponentUsdc, vault, tokenProgram: TOKEN_PROGRAM_ID })
         .instruction(),
     ], [opponent]),
@@ -242,7 +242,7 @@ async function main() {
   sig(
     "init_game",
     "solana",
-    await send(base, [await program.methods.initGame().accountsPartial({ creator: creator.publicKey, table, ...matchAccounts }).instruction()], [creator]),
+    await send(base, [await program.methods.initGame().accountsPartial({ payer: creator.publicKey, table, ...matchAccounts }).instruction()], [creator]),
   );
 
   log("\n[2] delegate to the TEE");

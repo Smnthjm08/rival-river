@@ -14,6 +14,8 @@ export interface TableView {
   status: TableStatus;
   /** Unix seconds: when refund becomes possible. */
   deadline: number;
+  /** Session keys named when staking, [creator, opponent]; null = none (yet). */
+  sessionKeys: Pair<PublicKey | null>;
 }
 
 /** Game, in plain JS types. Every pair is [creator, opponent]. */
@@ -47,6 +49,7 @@ export interface HandView {
 }
 
 const variant = <T extends string>(e: object) => Object.keys(e)[0] as T;
+const orNone = (ks: PublicKey[]) => ks.map((k) => (k.equals(PublicKey.default) ? null : k)) as Pair<PublicKey | null>;
 const num = (n: { toNumber(): number } | number) => (typeof n === "number" ? n : n.toNumber());
 
 /** How many board cards are face up. Waiting after a showdown keeps all five. */
@@ -61,6 +64,7 @@ export async function fetchTable(base: Connection, table: PublicKey): Promise<Ta
     stake: num(t.stake),
     status: variant<TableStatus>(t.status),
     deadline: num(t.deadline),
+    sessionKeys: orNone(t.sessionKeys as PublicKey[]),
   };
 }
 
@@ -75,7 +79,7 @@ export async function fetchGame(conn: Connection, game: PublicKey): Promise<Game
   return {
     handNumber: g.handNumber,
     players: g.players as Pair<PublicKey>,
-    sessionKeys: (g.sessionKeys as PublicKey[]).map((k) => (k.equals(PublicKey.default) ? null : k)) as Pair<PublicKey | null>,
+    sessionKeys: orNone(g.sessionKeys as PublicKey[]),
     permissionsReady: g.permissionsReady,
     stacks: g.stacks as Pair<number>,
     bets: g.bets as Pair<number>,
@@ -93,9 +97,13 @@ export async function fetchGame(conn: Connection, game: PublicKey): Promise<Game
   };
 }
 
-/** Your own Hand, through a TEE connection logged in as you. Null if unreadable. */
+/**
+ * Your own Hand, through a TEE connection logged in as you. Null only when
+ * the account isn't there; network and login errors (see isTeeAuthError)
+ * throw, so a failed read never looks like "no cards".
+ */
 export async function fetchHand(tee: Connection, hand: PublicKey): Promise<HandView | null> {
-  const info = await tee.getAccountInfo(hand).catch(() => null);
+  const info = await tee.getAccountInfo(hand);
   if (!info) return null;
   const h = program.coder.accounts.decode("hand", info.data);
   return { cards: h.dealt ? ((h.cards as number[]).map(card) as Pair<Card>) : null, hasSecret: h.hasSecret };

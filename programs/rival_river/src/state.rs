@@ -17,6 +17,10 @@ pub struct Table {
     /// After this (unix time), `refund` is allowed. join_table sets it to
     /// the end of the start window, init_game to the end of the match.
     pub deadline: i64,
+    /// Each player's session key, [creator, opponent], named when they stake
+    /// (Pubkey::default() = none). init_game copies them into the Game, so
+    /// the browser tab that staked can play without another wallet prompt.
+    pub session_keys: [Pubkey; 2],
     pub bump: u8,
 }
 

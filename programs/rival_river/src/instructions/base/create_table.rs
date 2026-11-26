@@ -1,10 +1,12 @@
 use anchor_lang::prelude::*;
+use anchor_lang::system_program::{transfer, Transfer};
 use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 use crate::constants::{TABLE_SEED, USDC_MINT};
 use crate::error::ErrorCode;
 use crate::escrow;
+use crate::instructions::base::init_game::game_rent;
 use crate::state::{Table, TableStatus};
 
 #[derive(Accounts)]
@@ -49,15 +51,23 @@ pub struct CreateTable<'info> {
 
 /// Opens a table and puts the creator's stake in the vault. The invited
 /// opponent matches it with join_table. Until then, cancel_table refunds it.
+///
+/// `session_key` (or Pubkey::default() for none) will sign the creator's
+/// moves on the rollup. The creator also pre-pays the game accounts' rent
+/// into the Table: whoever runs init_game is paid back from it, so the
+/// opponent can start the match when they join without paying for it.
 pub fn create_table_handler(
     ctx: Context<CreateTable>,
     table_id: u64,
     opponent: Pubkey,
     stake: u64,
+    session_key: Pubkey,
 ) -> Result<()> {
     let a = &ctx.accounts;
     require_keys_neq!(opponent, a.creator.key(), ErrorCode::OpponentIsCreator);
     require!(stake > 0, ErrorCode::ZeroStake);
+    // The other seat's wallet can't also sign for this one.
+    require_keys_neq!(session_key, opponent, ErrorCode::SessionKeyTaken);
 
     escrow::deposit(
         &a.creator,
@@ -76,7 +86,21 @@ pub fn create_table_handler(
         stake,
         status: TableStatus::WaitingForOpponent,
         deadline: 0,
+        session_keys: [session_key, Pubkey::default()],
         bump: ctx.bumps.table,
     });
+
+    // Rides in the Table's lamports until init_game; cancel_table and refund
+    // close the Table to the creator, so it comes back if no game starts.
+    transfer(
+        CpiContext::new(
+            ctx.accounts.system_program.key(),
+            Transfer {
+                from: ctx.accounts.creator.to_account_info(),
+                to: ctx.accounts.table.to_account_info(),
+            },
+        ),
+        game_rent()?,
+    )?;
     Ok(())
 }
