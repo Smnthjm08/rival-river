@@ -23,21 +23,23 @@ pub struct Settle<'info> {
     /// `Account` checks that this program owns the Game. While it's delegated
     /// the delegation program owns it, and Solana's copy is out of date, so
     /// settling fails until the game has been undelegated.
-    /// Game, Deck and Hands are closed; their rent goes to the creator.
-    #[account(mut, close = creator, seeds = [GAME_SEED, table.key().as_ref()], bump = game.bump,
+    ///
+    /// Game, Deck and Hands are never closed, so their rent stays in them.
+    /// On devnet, the match's transactions (with both players' secrets) became
+    /// readable by anyone on the private rollup once settle closed these
+    /// accounts. scripts/smoke-devnet.ts check (e) covers it.
+    #[account(seeds = [GAME_SEED, table.key().as_ref()], bump = game.bump,
               constraint = game.phase == Phase::Finished @ ErrorCode::MatchNotFinished)]
     pub game: Box<Account<'info, Game>>,
 
-    #[account(mut, close = creator, seeds = [DECK_SEED, game.key().as_ref()], bump = deck.bump)]
+    #[account(seeds = [DECK_SEED, game.key().as_ref()], bump = deck.bump)]
     pub deck: Box<Account<'info, Deck>>,
 
-    #[account(mut, close = creator,
-              seeds = [HAND_SEED, game.key().as_ref(), game.players[0].as_ref()],
+    #[account(seeds = [HAND_SEED, game.key().as_ref(), game.players[0].as_ref()],
               bump = hand_creator.bump)]
     pub hand_creator: Box<Account<'info, Hand>>,
 
-    #[account(mut, close = creator,
-              seeds = [HAND_SEED, game.key().as_ref(), game.players[1].as_ref()],
+    #[account(seeds = [HAND_SEED, game.key().as_ref(), game.players[1].as_ref()],
               bump = hand_opponent.bump)]
     pub hand_opponent: Box<Account<'info, Hand>>,
 
@@ -51,7 +53,7 @@ pub struct Settle<'info> {
               associated_token::token_program = token_program)]
     pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    /// Paid for the table, vault and game accounts, so gets their rent back.
+    /// Paid for the table and vault, so gets their rent back.
     #[account(mut)]
     pub creator: SystemAccount<'info>,
 

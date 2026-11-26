@@ -39,18 +39,22 @@ export function useTable(tablePda: PublicKey | null, everyMs = 3000) {
       setState({ table, gameOnSolana: null, onRollup: false });
       return;
     }
-    const gameOnSolana = await fetchGame(base, table.keys.game).catch(
-      () => null
-    );
-    let wrongRollup = false;
-    const onRollup = gameOnSolana
-      ? false
-      : await isOnRollup(table.keys).catch((e) => {
-          wrongRollup = programErrorName(e) === "WrongRollup";
-          if (wrongRollup) console.error("[rival]", e);
-          return false;
-        });
-    setState({ table, gameOnSolana, onRollup, wrongRollup });
+    try {
+      const gameOnSolana = await fetchGame(base, table.keys.game);
+      const onRollup = !gameOnSolana && (await isOnRollup(table.keys));
+      setState({ table, gameOnSolana, onRollup });
+    } catch (e) {
+      if (programErrorName(e) === "WrongRollup") {
+        console.error("[rival]", e);
+        setState({ table, gameOnSolana: null, onRollup: false, wrongRollup: true });
+        return;
+      }
+      // A failed read says nothing about the game: keep what's on screen, so
+      // one dropped request doesn't take a player off the table mid-hand.
+      // Only the first look at a match in play has nothing to keep.
+      console.warn("[rival] couldn't check where the game is", e);
+      setState((s) => (s.table?.status === "inPlay" ? s : { table, gameOnSolana: null, onRollup: false }));
+    }
   }, [tablePda]);
 
   useEffect(() => {

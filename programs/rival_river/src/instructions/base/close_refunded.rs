@@ -4,11 +4,10 @@ use crate::constants::{DECK_SEED, GAME_SEED, HAND_SEED};
 use crate::error::ErrorCode;
 use crate::state::{Deck, Game, Hand, Table, TableStatus};
 
-/// Runs on Solana. Anyone can send it: all rent goes to the creator, who paid
-/// it. `refund` can't close a game that is still on the rollup, so it leaves
-/// the Table (status Refunded) and the match accounts behind. Once
-/// undelegate_game has brought them back (allowed after the deadline), this
-/// closes all five.
+/// Runs on Solana. Anyone can send it: the rent goes to the creator, who paid
+/// it. `refund` keeps the Table (status Refunded) while the game is still on
+/// the rollup. Once undelegate_game has brought it back (allowed after the
+/// deadline), this closes the Table. Game, Deck and Hands stay: see settle.
 #[derive(Accounts)]
 pub struct CloseRefunded<'info> {
     #[account(
@@ -21,19 +20,17 @@ pub struct CloseRefunded<'info> {
 
     /// `Account` checks that this program owns the Game, so this fails while
     /// it's still delegated.
-    #[account(mut, close = creator, seeds = [GAME_SEED, table.key().as_ref()], bump = game.bump)]
+    #[account(seeds = [GAME_SEED, table.key().as_ref()], bump = game.bump)]
     pub game: Box<Account<'info, Game>>,
 
-    #[account(mut, close = creator, seeds = [DECK_SEED, game.key().as_ref()], bump = deck.bump)]
+    #[account(seeds = [DECK_SEED, game.key().as_ref()], bump = deck.bump)]
     pub deck: Box<Account<'info, Deck>>,
 
-    #[account(mut, close = creator,
-              seeds = [HAND_SEED, game.key().as_ref(), game.players[0].as_ref()],
+    #[account(seeds = [HAND_SEED, game.key().as_ref(), game.players[0].as_ref()],
               bump = hand_creator.bump)]
     pub hand_creator: Box<Account<'info, Hand>>,
 
-    #[account(mut, close = creator,
-              seeds = [HAND_SEED, game.key().as_ref(), game.players[1].as_ref()],
+    #[account(seeds = [HAND_SEED, game.key().as_ref(), game.players[1].as_ref()],
               bump = hand_opponent.bump)]
     pub hand_opponent: Box<Account<'info, Hand>>,
 
@@ -42,6 +39,6 @@ pub struct CloseRefunded<'info> {
 }
 
 pub fn close_refunded_handler(_ctx: Context<CloseRefunded>) -> Result<()> {
-    // The stakes went out in `refund`; the `close` constraints do the rest.
+    // The stakes went out in `refund`; the `close` constraint does the rest.
     Ok(())
 }

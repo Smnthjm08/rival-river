@@ -1165,14 +1165,12 @@ fn winner_takes_both_stakes() {
     assert!(undelegate_game(&mut s, &creator));
     assert_eq!(read_game(&s.svm, Base, s.game).winner, Some(winner as u8));
     assert!(!settle(&mut s, tokens[1 - winner]), "loser can't be paid");
-    let match_accounts = [s.game, s.deck, s.hand_creator, s.hand_opponent];
-    let rent: u64 = match_accounts.iter().map(|a| s.svm.get_balance(&addr(*a)).unwrap()).sum();
+    let before = match_accounts(&s);
+    let rent: u64 = [s.table, vault].iter().map(|a| s.svm.get_balance(&addr(*a)).unwrap()).sum();
     let creator_before = s.svm.get_balance(&creator.pubkey()).unwrap();
     assert!(settle(&mut s, tokens[winner]));
-    for a in match_accounts {
-        assert!(s.svm.get_account_for(Base, &addr(a)).map_or(true, |acc| acc.lamports == 0), "{a} not closed");
-    }
-    assert!(s.svm.get_balance(&creator.pubkey()).unwrap() >= creator_before + rent);
+    assert_eq!(match_accounts(&s), before, "the match accounts stay, untouched");
+    assert_eq!(s.svm.get_balance(&creator.pubkey()).unwrap(), creator_before + rent);
 
     assert_eq!(balance(&s.svm, tokens[winner]), Some(2 * STAKE));
     assert_eq!(balance(&s.svm, tokens[1 - winner]), Some(0));
@@ -1526,6 +1524,17 @@ fn finished_match_is_settled_not_refunded() {
 
 // ---- Edge cases: short stacks, end of match, closing up ---------------------------
 
+/// (lamports, data) of Game, Deck and both Hands on Solana. settle and the
+/// refunds must leave them there: closing them would publish the match's
+/// transaction history on the real rollup.
+fn match_accounts(s: &Setup) -> [(u64, Vec<u8>); 4] {
+    [s.game, s.deck, s.hand_creator, s.hand_opponent].map(|a| {
+        let acc = s.svm.get_account_for(Base, &addr(a)).expect("match account closed");
+        assert!(acc.lamports > 0, "{a} closed");
+        (acc.lamports, acc.data)
+    })
+}
+
 fn closed(s: &Setup, account: Pubkey) -> bool {
     s.svm.get_account_for(Base, &addr(account)).map_or(true, |a| a.lamports == 0)
 }
@@ -1665,21 +1674,20 @@ fn call_needs_something_to_call_and_act_needs_a_betting_round() {
 }
 
 #[test]
-fn refund_of_a_never_delegated_game_closes_everything() {
+fn refund_of_a_never_delegated_game_closes_the_table() {
     let mut s = setup();
     init_game(&mut s); // on Solana, Waiting: nobody delegated it
     let creator = s.creator.insecure_clone();
     advance_clock(&mut s, REFUNDABLE);
-    let accounts = [s.table, s.game, s.deck, s.hand_creator, s.hand_opponent];
-    let rent: u64 = accounts.iter().map(|a| s.svm.get_balance(&addr(*a)).unwrap()).sum();
+    let kept = match_accounts(&s);
+    let rent: u64 = [s.table, ata(s.table, s.mint)].iter().map(|a| s.svm.get_balance(&addr(*a)).unwrap()).sum();
     let before = s.svm.get_balance(&creator.pubkey()).unwrap();
     assert_eq!(refund(&mut s), None);
     let tokens = [key(&s.creator), key(&s.opponent)].map(|p| ata(p, s.mint));
     assert_eq!(tokens.map(|t| balance(&s.svm, t)), [Some(STAKE), Some(STAKE)]);
-    for a in accounts {
-        assert!(closed(&s, a), "{a} not closed");
-    }
-    assert!(s.svm.get_balance(&creator.pubkey()).unwrap() >= before + rent);
+    assert!(closed(&s, s.table), "table not closed");
+    assert_eq!(match_accounts(&s), kept);
+    assert_eq!(s.svm.get_balance(&creator.pubkey()).unwrap(), before + rent);
 }
 
 #[test]
@@ -1804,8 +1812,8 @@ fn no_delegating_after_the_deadline() {
     assert_eq!(error_name(&mut s.svm, Base, &creator, &ixs).as_deref(), Some("MatchExpired"));
 }
 
-/// refund leaves a delegated game behind; once it's back, close_refunded
-/// returns all the rent to the creator.
+/// refund keeps the Table while the game is delegated; once it's back,
+/// close_refunded returns the Table's rent to the creator.
 #[test]
 fn close_refunded_recovers_a_game_left_on_the_rollup() {
     let mut s = preflop(); // mid-hand, delegated, cards live
@@ -1820,13 +1828,12 @@ fn close_refunded_recovers_a_game_left_on_the_rollup() {
     assert!(undelegate_game(&mut s, &opponent));
     assert_nothing_secret_on_solana(&s);
 
-    let accounts = [s.table, s.game, s.deck, s.hand_creator, s.hand_opponent];
-    let rent: u64 = accounts.iter().map(|a| s.svm.get_balance(&addr(*a)).unwrap()).sum();
+    let kept = match_accounts(&s);
+    let rent = s.svm.get_balance(&addr(s.table)).unwrap();
     let before = s.svm.get_balance(&addr(key(&s.creator))).unwrap();
     assert_eq!(close_refunded(&mut s), None);
-    for a in accounts {
-        assert!(closed(&s, a), "{a} not closed");
-    }
+    assert!(closed(&s, s.table), "table not closed");
+    assert_eq!(match_accounts(&s), kept);
     assert_eq!(s.svm.get_balance(&addr(key(&s.creator))).unwrap(), before + rent);
     assert!(close_refunded(&mut s).is_some(), "only once");
 }
@@ -2102,5 +2109,61 @@ fn a_player_who_never_checks_in_loses_nothing() {
     advance_clock(&mut s, REFUNDABLE);
     assert_eq!(refund(&mut s), None);
     let tokens = [key(&s.creator), key(&s.opponent)].map(|p| ata(p, s.mint));
+    assert_eq!(tokens.map(|t| balance(&s.svm, t)), [Some(STAKE), Some(STAKE)]);
+}
+
+// ---- Reusing a table id -------------------------------------------------------
+
+/// The match accounts outlive their Table, so a creator who reuses its id gets
+/// a table whose game can't be created. Stakes put into it must still come back.
+#[test]
+fn a_reused_table_id_cannot_trap_stakes() {
+    let mut s = finished();
+    let (creator, opponent) = (s.creator.insecure_clone(), s.opponent.insecure_clone());
+    assert!(undelegate_game(&mut s, &creator));
+    let winner = read_game(&s.svm, Base, s.game).winner.unwrap() as usize;
+    let mint = s.mint;
+    assert!(settle(&mut s, ata([key(&creator), key(&opponent)][winner], mint)));
+
+    for k in [&creator, &opponent] {
+        fund(&mut s.svm, key(k), mint, STAKE);
+    }
+    let vault = ata(s.table, s.mint);
+    assert!(send(&mut s.svm, Base, &creator, ix(
+        instruction::CreateTable {
+            table_id: 1,
+            opponent: key(&opponent),
+            stake: STAKE,
+            session_key: Pubkey::default(),
+            invite_key: Pubkey::default(),
+        },
+        accounts::CreateTable {
+            creator: key(&creator),
+            table: s.table,
+            mint: s.mint,
+            creator_token: ata(key(&creator), s.mint),
+            vault,
+            token_program: token_program(),
+            associated_token_program: Pubkey::new_from_array(ASSOCIATED_TOKEN_PROGRAM_ID.to_bytes()),
+            system_program: system_program::ID,
+        },
+    )));
+    assert!(send(&mut s.svm, Base, &opponent, ix(
+        instruction::JoinTable { session_key: Pubkey::default(), stake: STAKE },
+        accounts::JoinTable {
+            opponent: key(&opponent),
+            invite: None,
+            table: s.table,
+            mint: s.mint,
+            opponent_token: ata(key(&opponent), s.mint),
+            vault,
+            token_program: token_program(),
+        },
+    )));
+    assert!(init_game_err(&mut s).is_some(), "the old game is still there");
+
+    advance_clock(&mut s, REFUNDABLE);
+    assert_eq!(refund(&mut s), None);
+    let tokens = [key(&creator), key(&opponent)].map(|p| ata(p, s.mint));
     assert_eq!(tokens.map(|t| balance(&s.svm, t)), [Some(STAKE), Some(STAKE)]);
 }

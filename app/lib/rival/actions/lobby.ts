@@ -186,7 +186,9 @@ export async function isOnRollup(keys: MatchKeys): Promise<boolean> {
     }),
   });
   const { result } = (await r.json()) as { result?: { isDelegated?: boolean; fqdn?: string } };
-  if (!result?.isDelegated) return false;
+  // An error reply isn't a "no": callers keep what they knew and ask again.
+  if (!result) throw new TxError(`The router didn't answer (HTTP ${r.status})`, "RouterUnavailable");
+  if (!result.isDelegated) return false;
   // Everything on the rollup goes to TEE_RPC: reads, session-key sign-ins,
   // moves. The program pins the TEE validator, so the router should always
   // point there; if it doesn't, stop rather than talk to the wrong rollup.

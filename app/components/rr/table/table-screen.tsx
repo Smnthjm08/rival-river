@@ -11,11 +11,12 @@ import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { SiteHeader } from "@/components/rr/site-header";
+import { PlayingCard } from "@/components/rr/playing-card";
 import { CHARACTER_NAMES, charactersFor } from "@/components/rr/seat-avatar";
 import { Eyebrow, useSecondsLeft } from "@/components/rr/table-pieces";
 import { type SeatInfo } from "@/components/rr/table/felt";
@@ -50,6 +51,7 @@ import {
   seatOf,
   startMatch,
   waitForRollup,
+  type Card as GameCard,
   type GameView,
   type Seat,
   type TableView,
@@ -85,18 +87,60 @@ function Shell({ children, pills }: { children: React.ReactNode; pills?: React.R
   return (
     <>
       <SiteHeader>{pills}</SiteHeader>
-      <main className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-8 sm:pb-10">{children}</main>
+      <main className="mx-auto w-full max-w-360 px-4 py-6 sm:px-8 sm:pb-10">{children}</main>
     </>
   );
 }
 
-function Notice({ title, description, children }: { title: string; description: React.ReactNode; children?: React.ReactNode }) {
+/**
+ * How the match's last hand ended. The table itself goes away within seconds,
+ * when the game returns to Solana, so the result screens repeat it.
+ */
+function FinalHand({ game, viewer }: { game: GameView; viewer: PublicKey | null }) {
+  // Named from the game itself: the table may already be closed.
+  const chars = charactersFor(...game.players);
+  const name = (i: 0 | 1) => (viewer?.equals(game.players[i]) ? "You" : CHARACTER_NAMES[chars[i]]);
+  const rows: [string, GameCard[]][] = game.shown
+    ? [
+        ["Board", game.board],
+        [name(0), game.shown[0]],
+        [name(1), game.shown[1]],
+      ]
+    : [];
+  return (
+    <div className="flex flex-col gap-3">
+      <Eyebrow>Final hand · hand {game.handNumber}</Eyebrow>
+      {rows.map(([label, cards], i) => (
+        <div key={i} className="flex flex-wrap items-center gap-2">
+          <span className="w-24 text-sm text-muted-foreground">{label}</span>
+          {cards.map((c) => (
+            <PlayingCard key={c.id} card={c} width={44} />
+          ))}
+        </div>
+      ))}
+      {!game.shown && <span className="text-sm text-muted-foreground">It ended with a fold, so no cards were shown.</span>}
+    </div>
+  );
+}
+
+function Notice({
+  title,
+  description,
+  detail,
+  children,
+}: {
+  title: string;
+  description: React.ReactNode;
+  detail?: React.ReactNode;
+  children?: React.ReactNode;
+}) {
   return (
     <Card size="lg" className="mx-auto mt-10 max-w-xl">
       <CardHeader>
         <CardTitle className="font-heading text-3xl font-extrabold tracking-tight">{title}</CardTitle>
         <CardDescription className="text-base/relaxed">{description}</CardDescription>
       </CardHeader>
+      {detail && <CardContent>{detail}</CardContent>}
       <CardFooter className="flex flex-wrap gap-3">
         {children}
         <Button variant="outline" size="xl" nativeButton={false} render={<Link href="/" />}>
@@ -233,8 +277,8 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
   // In play: seconds until the two-hour mark, when play stops.
   const playEndsIn = useSecondsLeft(table?.status === "inPlay" ? table.deadline : null);
 
-  // A refund while the game was still on the rollup leaves the Table and the
-  // game's accounts open: bring the game back, then close them (rent to the creator).
+  // A refund while the game was still on the rollup leaves the Table open:
+  // bring the game back, then close it (rent to the creator).
   const closeLeftovers = useCallback(() => {
     if (!wallet || !table) return;
     void run("Closing the table…", async () => {
@@ -245,13 +289,18 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
   }, [wallet, table, activeSeat, run]);
   const turnPill = useTurnPill(liveGame, activeSeat?.seat ?? null, seats);
 
+  // The finished game, from Solana or as this tab last saw it on the rollup.
+  // It outlives the table, which settle closes.
+  const finalGame = [gameOnSolana, liveGame].find((g) => g?.phase === "finished");
+  const finalHand = finalGame && <FinalHand game={finalGame} viewer={wallet?.publicKey ?? null} />;
+
   // ---- Loading and closed tables ----------------------------------------------
   if (table === undefined) {
     return (
       <Shell>
         <div className="flex flex-col gap-4">
           <Skeleton className="h-12 w-72" />
-          <Skeleton className="aspect-[16/10] w-full rounded-[2.5rem] md:rounded-[50%]" />
+          <Skeleton className="aspect-16/10 w-full rounded-[2.5rem] md:rounded-[50%]" />
         </div>
       </Shell>
     );
@@ -262,6 +311,7 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
         {final ? (
           <Notice
             title={final.iWon === false ? "Match settled" : "Winnings paid"}
+            detail={finalHand}
             description={
               <>
                 <span className="font-mono font-semibold text-brass">{formatUsdc(final.amount)} USDC</span>
@@ -283,6 +333,7 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
         ) : (
           <Notice
             title="This table is closed"
+            detail={finalHand}
             description="It was settled, cancelled or refunded. Settled matches paid the winner; the others returned the stakes."
           />
         )}
@@ -408,7 +459,7 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
       <Shell>
         <Notice
           title="Stakes returned"
-          description="Both players got their stake back. The game was still on the private rollup, so its accounts are still open: either player can close them, and the rent goes back to the creator."
+          description="Both players got their stake back. The game was still on the private rollup, so the table is still open: either player can close it, and its rent goes back to the creator."
         >
           {me !== null && (
             <Button size="xl" disabled={!!busy} onClick={closeLeftovers}>
@@ -439,6 +490,7 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
     return (
       <Shell>
         <Notice
+          detail={finalHand}
           title={me === null ? "Match finished" : iWon ? "You won the match" : `${opponent.name === "You" ? creator.name : opponent.name} won the match`}
           description={
             <>
@@ -494,9 +546,12 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
       // Same in-between state when the game comes back after the match.
       const leaving = liveGame?.phase === "finished" || playEndsIn === 0;
       body = leaving ? (
-        <Heading eyebrow="Match over" title="Bringing the game back to Solana" spinner>
-          {busy ?? "The cards and secrets are wiped, then the result lands on Solana. This takes a few seconds."}
-        </Heading>
+        <>
+          <Heading eyebrow="Match over" title="Bringing the game back to Solana" spinner>
+            {busy ?? "The cards and secrets are wiped, then the result lands on Solana. This takes a few seconds."}
+          </Heading>
+          {finalHand}
+        </>
       ) : (
         <Heading eyebrow="Both stakes in" title="Opening the private table" spinner>
           {busy ?? "Moving the game to MagicBlock’s private rollup. This takes a few seconds."}

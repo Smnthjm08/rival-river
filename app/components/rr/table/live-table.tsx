@@ -49,8 +49,8 @@ export function LiveTable({ seat, table, seats, busy, onCollect, onRefund, onGam
 
   // Match over, or out of time: the session key brings the game back to
   // Solana (no prompt). Collecting is then just the payout, and a refund
-  // closes every account at once instead of stranding the rent on the
-  // rollup. Both tabs may; the second one waits.
+  // closes the table at once instead of leaving it open until the game is
+  // back. Both tabs may; the second one waits.
   const returning = useRef(false);
   const over = game?.phase === "finished" || pastDeadline;
   useEffect(() => {

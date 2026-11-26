@@ -45,11 +45,10 @@ pub struct UndelegateGame<'info> {
 /// back to Solana, then the delegation program hands ownership back to this
 /// program (via the callback `#[ephemeral]` added).
 ///
-/// The permissions stay open on purpose. The rollup decides who may read a
-/// past transaction from them, and the match's transactions carry both
-/// players' secrets and the shuffle randomness: closing them would let
-/// anyone rebuild every deck. A match is never re-delegated, so the only cost
-/// is the permissions' rent.
+/// The permissions stay open on purpose, and settle and refund leave the
+/// accounts in place: the match's transactions carry both players' secrets and
+/// the shuffle randomness, and anyone who can read them can rebuild every
+/// deck. A match is never re-delegated, so the only cost is rent.
 pub fn undelegate_game_handler(ctx: Context<UndelegateGame>) -> Result<()> {
     let a = ctx.accounts;
     require!(

@@ -1,11 +1,12 @@
-//! When a match won't finish: return both stakes, then reclaim the rent.
+//! When a match won't finish: return both stakes, then close the table. The
+//! game accounts are never closed (see the program's settle).
 //!
 //!   refund         anyone, once refundOpensAt has passed. Pays each player
-//!                  their stake back. Closes everything if the game is on
-//!                  Solana; if it's still on the rollup, the Table stays.
+//!                  their stake back. Closes the table if the game is on
+//!                  Solana; if it's still on the rollup, the table stays.
 //!   undelegate     a player (see finish.ts), past the match deadline, to
 //!                  bring a refunded game back from the rollup.
-//!   closeRefunded  anyone, after that: returns all the rent to the creator.
+//!   closeRefunded  anyone, after that: closes the table, rent to the creator.
 import {
   createAssociatedTokenAccountIdempotentInstruction,
   TOKEN_PROGRAM_ID,

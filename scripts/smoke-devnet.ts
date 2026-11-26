@@ -714,24 +714,6 @@ async function main() {
     async () => (await base.getAccountInfo(game))?.owner.equals(PID),
     180
   );
-  // The history must stay private once the match has left the rollup: with
-  // both secrets and the VRF answer anyone can rebuild the decks.
-  const leaks: string[] = [];
-  for (const [owner, s] of secretSigs.entries()) {
-    const others = [
-      ["the other player", teeOf[1 - owner]],
-      ["the public", teePublic],
-    ] as const;
-    for (const [who, conn] of others)
-      if (await seen(conn, s))
-        leaks.push(`${who} reads seat ${owner}'s secret`);
-  }
-  check(
-    "(e) after the match, nobody else can fetch a submit_secret tx",
-    secretSigs.length === 2 && leaks.length === 0,
-    leaks.join("; ") || "both stayed private"
-  );
-
   const final = await readGame(base);
   const winner = final.winner as number;
   const winnerUsdc = [creatorUsdc, opponentUsdc][winner];
@@ -769,10 +751,34 @@ async function main() {
       base.getAccountInfo(a)
     )
   );
+  const [kept, gone] = [closed.slice(2), closed.slice(0, 2)];
   check(
-    "table, vault and match accounts closed",
-    closed.every((a) => a === null),
-    `${closed.filter((a) => a === null).length}/6 closed`
+    "table and vault closed, match accounts kept",
+    gone.every((a) => a === null) && kept.every((a) => a?.owner.equals(PID)),
+    `${gone.filter((a) => a === null).length}/2 closed, ${
+      kept.filter((a) => a !== null).length
+    }/4 kept`
+  );
+
+  // The history must stay private once the match is over: with both secrets
+  // and the VRF answer anyone can rebuild the decks. Checked after settle:
+  // when settle closed the game accounts, that is what exposed it. The wait
+  // gives the rollup time to notice anything settle changed.
+  await new Promise((r) => setTimeout(r, 30_000));
+  const leaks: string[] = [];
+  for (const [owner, s] of secretSigs.entries()) {
+    const others = [
+      ["the other player", teeOf[1 - owner]],
+      ["the public", teePublic],
+    ] as const;
+    for (const [who, conn] of others)
+      if (await seen(conn, s))
+        leaks.push(`${who} reads seat ${owner}'s secret`);
+  }
+  check(
+    "(e) after the match, nobody else can fetch a submit_secret tx",
+    secretSigs.length === 2 && leaks.length === 0,
+    leaks.join("; ") || "both stayed private"
   );
 }
 

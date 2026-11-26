@@ -23,7 +23,7 @@ const m = program.methods;
 
 /**
  * True once the game is off the rollup: owned by the program on Solana again,
- * or already closed by settle / close_refunded (the other tab got there first).
+ * or missing altogether. Settle leaves it in place.
  * Only meaningful for a game that was delegated.
  */
 const backOnSolana = async (keys: MatchKeys) => {
@@ -83,7 +83,7 @@ export async function finishMatch(
     await undelegate(wallet, s);
   }
   const game = await fetchGame(base, keys.game);
-  if (!game) return null; // settle closed it between our checks
+  if (!game) return null; // not readable on Solana: nothing to pay out
   if (game.winner == null)
     throw new TxError("The match has no winner yet", "MatchNotFinished");
   const winner = game.players[game.winner];

@@ -72,6 +72,9 @@ Ephemeral Rollup:
   player, so neither the oracle nor either player can work out the deck.
 - Before anything goes back to Solana, the deck, hole cards and secrets are
   wiped, so folded hands are never revealed.
+- The game accounts stay on Solana after the match (their rent, about
+  0.0053 SOL a match, isn’t returned). On devnet, closing them made the
+  match’s transaction history readable by anyone.
 
 Solana devnet handles the USDC escrow, refunds, and the payout to the
 winner.
