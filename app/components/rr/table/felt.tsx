@@ -81,13 +81,13 @@ export function Felt({ game, hand, me, seats, lastResult }: FeltProps) {
   const dealDelay = (round: number, mine: boolean) => round * 0.3 + (mine ? 0.15 : 0);
 
   return (
-    <div className="relative flex w-full flex-col items-center justify-between gap-6 rounded-[2.5rem] border-[12px] border-rail bg-felt px-4 py-8 shadow-[inset_0_0_0_2px_rgb(63_182_168/0.16),0_30px_60px_rgb(0_0_0/0.35)] md:aspect-[16/10] md:rounded-[50%] md:border-[16px] md:px-20 md:py-10">
+    <div className="relative flex w-full flex-col items-center justify-between gap-3.5 rounded-[2rem] border-8 border-rail bg-felt px-3 py-4 md:gap-6 shadow-[inset_0_0_0_2px_rgb(63_182_168/0.16),0_30px_60px_rgb(0_0_0/0.35)] md:aspect-16/10 md:rounded-[50%] md:border-16 md:px-20 md:py-10">
       <div aria-hidden="true" className="pointer-events-none absolute inset-4 hidden rounded-[50%] border-2 border-river/15 md:block" />
 
       {/* Opponent */}
       <div className="flex flex-col items-center gap-3">
         <div className="flex flex-wrap items-center justify-center gap-4">
-          <div className="flex h-[81px] min-w-24">
+          <div className="flex h-20.25 min-w-24">
             {shown ? (
               <>
                 <div className="-rotate-6"><RevealedCard key={`shown-${n}-0`} card={shown[opp][0]} width={58} /></div>
@@ -129,13 +129,13 @@ export function Felt({ game, hand, me, seats, lastResult }: FeltProps) {
       {/* You */}
       <div className="flex flex-col items-center gap-3">
         {game.bets[me] > 0 && <BetPill amount={game.bets[me]} />}
-        <div className="flex flex-wrap items-end justify-center gap-5">
+        <div className="flex flex-wrap items-end justify-center gap-3.5 md:gap-5">
           <SeatPlate info={seats[me]} stack={game.stacks[me]} state={seatState(game, me, lastResult)} dealer={game.dealer === me} mine />
-          <div className="flex flex-col items-center gap-2.5">
+          <div className="flex flex-col items-center gap-2.5 max-md:order-first">
             <div className="flex gap-2">
               {myCards ? (
                 <>
-                  <div className="-rotate-[4deg]"><DealtCard key={`me-${n}-0`} card={myCards[0]} width="hand" from={{ x: 60, y: -210 }} delay={dealDelay(0, true)} /></div>
+                  <div className="rotate-[-4deg]"><DealtCard key={`me-${n}-0`} card={myCards[0]} width="hand" from={{ x: 60, y: -210 }} delay={dealDelay(0, true)} /></div>
                   <div className="rotate-[4deg]"><DealtCard key={`me-${n}-1`} card={myCards[1]} width="hand" from={{ x: -40, y: -210 }} delay={dealDelay(1, true)} /></div>
                 </>
               ) : (

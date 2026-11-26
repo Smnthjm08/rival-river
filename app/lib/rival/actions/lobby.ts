@@ -8,7 +8,7 @@ import {
   delegationMetadataPdaFromDelegatedAccount,
   delegationRecordPdaFromDelegatedAccount,
 } from "@magicblock-labs/ephemeral-rollups-sdk";
-import { PROGRAM_ID, ROUTER_RPC, USDC_MINT } from "../config";
+import { PROGRAM_ID, ROUTER_RPC, TEE_RPC, USDC_MINT } from "../config";
 import { base, waitFor } from "../chain/connection";
 import {
   matchKeys,
@@ -18,7 +18,7 @@ import {
 } from "../chain/pdas";
 import { program } from "../chain/program";
 import type { WalletSigner } from "../chain/signer";
-import { sendTx } from "../chain/tx";
+import { sendTx, TxError } from "../chain/tx";
 import { sessionKeypair } from "../session/session-key";
 
 const m = program.methods;
@@ -162,8 +162,16 @@ export async function isOnRollup(keys: MatchKeys): Promise<boolean> {
       params: [keys.game.toBase58()],
     }),
   });
-  const { result } = (await r.json()) as { result?: { isDelegated?: boolean } };
-  return !!result?.isDelegated;
+  const { result } = (await r.json()) as { result?: { isDelegated?: boolean; fqdn?: string } };
+  if (!result?.isDelegated) return false;
+  // Everything on the rollup goes to TEE_RPC: reads, session-key sign-ins,
+  // moves. The program pins the TEE validator, so the router should always
+  // point there; if it doesn't, stop rather than talk to the wrong rollup.
+  const host = (u: string) => new URL(u).host;
+  if (result.fqdn && host(result.fqdn) !== host(TEE_RPC)) {
+    throw new TxError(`The game is on ${host(result.fqdn)}, not the private rollup at ${host(TEE_RPC)}`, "WrongRollup");
+  }
+  return true;
 }
 
 export const waitForRollup = (keys: MatchKeys) =>

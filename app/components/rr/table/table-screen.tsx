@@ -39,7 +39,10 @@ import {
   joinTable,
   matchKeys,
   MAX_HANDS,
+  closeRefunded,
   refund,
+  teeConnection,
+  undelegate,
   refundOpensAt,
   seatOf,
   startMatch,
@@ -111,7 +114,7 @@ interface FinalResult {
 function TableFlow({ tablePda }: { tablePda: PublicKey }) {
   const wallet = useWalletSigner();
   const { publicKey: connected } = useWallet();
-  const { table, gameOnSolana, onRollup, refresh } = useTable(tablePda);
+  const { table, gameOnSolana, onRollup, wrongRollup, refresh } = useTable(tablePda);
   const [seat, setSeat] = useState<Seat | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [liveGame, setLiveGame] = useState<GameView | null>(null);
@@ -177,6 +180,12 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
     }
   }, [onRollup, table, me, activeSeat, wallet, busy, takeSeat]);
 
+  // Another tab of this wallet took the seat: register this tab's key again.
+  const playHere = useCallback(() => {
+    if (!wallet || !table) return;
+    void run("Taking your seat back…", async () => setSeat(await enterRollup(wallet, table)));
+  }, [wallet, table, run]);
+
   // The TEE refused the login token: forget it and sit down again.
   const authLost = useCallback(() => {
     if (!wallet) return;
@@ -213,6 +222,19 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
   }, [wallet, table, run]);
 
   const refundIn = useSecondsLeft(table ? refundOpensAt(table) : null);
+  // In play: seconds until the two-hour mark, when play stops.
+  const playEndsIn = useSecondsLeft(table?.status === "inPlay" ? table.deadline : null);
+
+  // A refund while the game was still on the rollup leaves the Table and the
+  // game's accounts open: bring the game back, then close them (rent to the creator).
+  const closeLeftovers = useCallback(() => {
+    if (!wallet || !table) return;
+    void run("Closing the table…", async () => {
+      const tee = activeSeat?.tee ?? (await teeConnection(wallet));
+      await undelegate(activeSeat?.session ?? wallet, { keys: table.keys, tee });
+      await closeRefunded(wallet, table.keys);
+    });
+  }, [wallet, table, activeSeat, run]);
   const turnPill = useTurnPill(liveGame, activeSeat?.seat ?? null, seats);
 
   // ---- Loading and closed tables ----------------------------------------------
@@ -328,7 +350,29 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
   if (table.status === "refunded") {
     return (
       <Shell>
-        <Notice title="Stakes returned" description="Both players got their stake back. The game’s accounts close once it’s back from the rollup." />
+        <Notice
+          title="Stakes returned"
+          description="Both players got their stake back. The game was still on the private rollup, so its accounts are still open: either player can close them, and the rent goes back to the creator."
+        >
+          {me !== null && (
+            <Button size="xl" disabled={!!busy} onClick={closeLeftovers}>
+              {busy && <Spinner data-icon="inline-start" />}
+              {busy ?? "Close the table"}
+            </Button>
+          )}
+        </Notice>
+      </Shell>
+    );
+  }
+
+  // ---- The router put the game somewhere other than the private rollup -----------
+  if (wrongRollup) {
+    return (
+      <Shell>
+        <Notice
+          title="The game is on an unexpected rollup"
+          description="The router says this game is delegated somewhere other than MagicBlock’s private TEE rollup, so the app won’t send it anything. Your stakes are still in the escrow on Solana; after the deadline either player can refund them."
+        />
       </Shell>
     );
   }
@@ -368,16 +412,36 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
     if (refundable) {
       body = (
         <>
-          <Heading eyebrow="Match didn’t start" title="Refund both stakes">
-            The start deadline passed before the match reached the private rollup. Anyone can return both stakes now.
-          </Heading>
+          {table.status === "inPlay" && gameOnSolana ? (
+            <Heading eyebrow="Out of time" title="Refund both stakes">
+              The match didn’t finish within two hours. Anyone can return both stakes now.
+            </Heading>
+          ) : (
+            <Heading eyebrow="Match didn’t start" title="Refund both stakes">
+              The start deadline passed before the match reached the private rollup. Anyone can return both stakes now.
+            </Heading>
+          )}
           <Button size="2xl" className="w-fit" disabled={!wallet || !!busy} onClick={doRefund}>
             {busy ?? "Refund both stakes"}
           </Button>
         </>
       );
-    } else if (arriving || busy) {
+    } else if (table.status === "inPlay" && gameOnSolana && playEndsIn === 0) {
+      // Out of time and back on Solana: nothing to start, wait for the refund.
       body = (
+        <Heading eyebrow="Out of time" title="Play stopped at the two-hour mark">
+          The match didn’t finish in time, so no more hands can be played. Either player can return both stakes
+          {refundIn ? ` in ${Math.floor(refundIn / 60)}:${String(refundIn % 60).padStart(2, "0")}` : " in a moment"}.
+        </Heading>
+      );
+    } else if (arriving || busy) {
+      // Same in-between state when the game comes back after the match.
+      const leaving = liveGame?.phase === "finished" || playEndsIn === 0;
+      body = leaving ? (
+        <Heading eyebrow="Match over" title="Bringing the game back to Solana" spinner>
+          {busy ?? "The cards and secrets are wiped, then the result lands on Solana. This takes a few seconds."}
+        </Heading>
+      ) : (
         <Heading eyebrow="Both stakes in" title="Opening the private table" spinner>
           {busy ?? "Moving the game to MagicBlock’s private rollup. This takes a few seconds."}
         </Heading>
@@ -454,7 +518,7 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
         </Badge>
       )}
       {g && g.handNumber > 0 && (
-        <Badge variant="rail" size="lg">
+        <Badge variant="rail" size="lg" className="max-sm:hidden">
           Blinds <span className="font-mono font-semibold">{small} / {big}</span>
         </Badge>
       )}
@@ -463,7 +527,7 @@ function TableFlow({ tablePda }: { tablePda: PublicKey }) {
   );
   return (
     <Shell pills={pills}>
-      <LiveTable seat={activeSeat} table={table} seats={seats!} busy={busy} onCollect={collect} onRefund={doRefund} onGame={setLiveGame} onAuthLost={authLost} />
+      <LiveTable seat={activeSeat} table={table} seats={seats!} busy={busy} onCollect={collect} onRefund={doRefund} onGame={setLiveGame} onAuthLost={authLost} onPlayHere={playHere} />
     </Shell>
   );
 }

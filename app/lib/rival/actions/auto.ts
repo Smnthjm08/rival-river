@@ -23,6 +23,10 @@ export function dueSteps(
   now = Date.now() / 1000
 ): AutoStep[] {
   if (!game.permissionsReady || game.phase === "finished") return [];
+  // Play stops at the match deadline: the program refuses with MatchExpired,
+  // and on the rollup a refused transaction still runs and is recorded, so
+  // sending them would spam the TEE every poll until the tab closed.
+  if (now > game.matchDeadline) return [];
   const late = now > game.deadline;
   switch (game.phase) {
     case "waiting":

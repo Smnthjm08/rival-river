@@ -21,6 +21,7 @@ import {
   canSitSilently,
   createTable,
   enterRollup,
+  fetchGame,
   fetchHand,
   fetchMatch,
   fetchTable,
@@ -38,6 +39,7 @@ import {
   type Seat,
   type WalletSigner,
 } from "../lib/rival";
+import { store } from "../lib/rival/session/storage";
 
 const STAKE = 10_000; // 0.01 USDC each
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -202,6 +204,23 @@ async function main() {
     }`
   );
 
+  console.log("[2b] the creator opens a second tab, which takes the seat; the first takes it back");
+  // Node has one shared store; swap the first tab's key out to act as a fresh tab.
+  const slot = `rr:session:${keys.game.toBase58()}:${C.wallet.publicKey.toBase58()}`;
+  const tabA = store.get(slot)!;
+  store.remove(slot);
+  const tabB = await enterRollup(C.wallet, table);
+  store.set(slot, tabA);
+  const seatKey = async () => (await fetchGame(sc.tee, keys.game))!.sessionKeys[0];
+  const displaced = (await seatKey())?.equals(tabB.session.publicKey) === true;
+  console.log(`  first tab sees it lost the seat: ${displaced ? "yes (good)" : "NO (bad)"}`);
+  const promptsBefore = C.prompts.length;
+  const back = await enterRollup(C.wallet, table);
+  const takeBack = C.prompts.slice(promptsBefore);
+  const restored = (await seatKey())?.equals(sc.session.publicKey) === true && back.session.publicKey.equals(sc.session.publicKey);
+  console.log(`  "Play here instead": prompts [${takeBack.join(", ")}], seat back with the first tab's key: ${restored ? "yes (good)" : "NO (bad)"}`);
+  const twoTabsOk = displaced && restored && takeBack.length === 1 && takeBack[0] === "signTransaction";
+
   console.log("[3] play (both loops racing)");
   const t0 = Date.now();
   const [final] = await Promise.all([
@@ -241,6 +260,7 @@ async function main() {
   console.log("[5] wallet prompts");
   console.log(`  creator  (${C.prompts.length}): ${C.prompts.join(", ")}`);
   console.log(`  opponent (${O.prompts.length}): ${O.prompts.join(", ")}`);
+  if (!twoTabsOk) process.exitCode = 1;
   if (peek !== null || gained !== 2 * STAKE) process.exitCode = 1;
 }
 

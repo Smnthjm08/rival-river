@@ -90,10 +90,10 @@ export function TablePreview() {
             <Badge variant="river" size="lg" className="font-semibold">The Otter’s turn</Badge>
           ))}
         <Badge variant="rail" size="lg" className="font-semibold">Hand 3 of 6</Badge>
-        <Badge variant="rail" size="lg">Blinds <span className="font-mono font-semibold">20 / 40</span></Badge>
+        <Badge variant="rail" size="lg" className="max-sm:hidden">Blinds <span className="font-mono font-semibold">20 / 40</span></Badge>
         <Badge variant="river" size="lg" className="font-semibold"><LockIcon />Private rollup</Badge>
       </SiteHeader>
-      <main className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-8 sm:pb-10">
+      <main className="mx-auto w-full max-w-360 px-4 py-6 sm:px-8 sm:pb-10">
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <Eyebrow className="mr-2">Preview · replay</Eyebrow>
           {STAGES.map((s) => (
@@ -102,7 +102,7 @@ export function TablePreview() {
             </Button>
           ))}
         </div>
-        <div className="flex flex-wrap gap-6">
+        <div className="flex flex-wrap gap-6 max-md:pb-32">
           <section aria-label="Table" className="flex min-w-0 flex-[999_1_720px] flex-col gap-4.5">
             <Felt
               key={run}

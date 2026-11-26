@@ -7,6 +7,7 @@ import {
   fetchGame,
   fetchTable,
   isOnRollup,
+  programErrorName,
   type GameView,
   type TableView,
 } from "@/lib/rival";
@@ -18,6 +19,8 @@ export interface TableState {
   gameOnSolana: GameView | null;
   /** The router reports the game delegated to the rollup. */
   onRollup: boolean;
+  /** The router put the game on a rollup other than the TEE: nothing is safe to send. */
+  wrongRollup?: boolean;
 }
 
 /** Polls a table on Solana. Cheap enough at one read every few seconds. */
@@ -39,10 +42,15 @@ export function useTable(tablePda: PublicKey | null, everyMs = 3000) {
     const gameOnSolana = await fetchGame(base, table.keys.game).catch(
       () => null
     );
+    let wrongRollup = false;
     const onRollup = gameOnSolana
       ? false
-      : await isOnRollup(table.keys).catch(() => false);
-    setState({ table, gameOnSolana, onRollup });
+      : await isOnRollup(table.keys).catch((e) => {
+          wrongRollup = programErrorName(e) === "WrongRollup";
+          if (wrongRollup) console.error("[rival]", e);
+          return false;
+        });
+    setState({ table, gameOnSolana, onRollup, wrongRollup });
   }, [tablePda]);
 
   useEffect(() => {

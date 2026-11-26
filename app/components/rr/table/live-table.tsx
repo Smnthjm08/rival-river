@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { CheckIcon, HourglassIcon, ShuffleIcon, TrophyIcon } from "lucide-react";
+import { CheckIcon, HourglassIcon, MonitorSmartphoneIcon, ShuffleIcon, TrophyIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
-import { ActionBar } from "@/components/rr/table/action-bar";
+import { ActionBar, PINNED_ON_PHONES } from "@/components/rr/table/action-bar";
 import { Felt, type SeatInfo } from "@/components/rr/table/felt";
 import { MatchSidebar } from "@/components/rr/table/match-sidebar";
 import { useSecondsLeft } from "@/components/rr/table-pieces";
@@ -29,13 +29,15 @@ interface LiveTableProps {
   onGame: (g: GameView) => void;
   /** The TEE refused this tab's login: the player has to sign in again. */
   onAuthLost: () => void;
+  /** Another tab of the same wallet took this seat: take it back here. */
+  onPlayHere: () => void;
 }
 
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
 /** The table while the game is on the rollup: felt, actions, and the side panel. */
-export function LiveTable({ seat, table, seats, busy, onCollect, onRefund, onGame, onAuthLost }: LiveTableProps) {
-  const { game, hand, lastResult, results, act, acting } = useMatch(seat, onAuthLost);
+export function LiveTable({ seat, table, seats, busy, onCollect, onRefund, onGame, onAuthLost, onPlayHere }: LiveTableProps) {
+  const { game, hand, lastResult, results, act, acting, displaced } = useMatch(seat, onAuthLost);
   const me = seat.seat;
   const opp = (1 - me) as 0 | 1;
   const pastDeadline = useSecondsLeft(game?.matchDeadline ?? null) === 0;
@@ -45,22 +47,25 @@ export function LiveTable({ seat, table, seats, busy, onCollect, onRefund, onGam
     if (game) onGame(game);
   }, [game, onGame]);
 
-  // Match over: the session key brings the game back to Solana (no prompt),
-  // so collecting is just the payout. Both tabs may; the second one waits.
+  // Match over, or out of time: the session key brings the game back to
+  // Solana (no prompt). Collecting is then just the payout, and a refund
+  // closes every account at once instead of stranding the rent on the
+  // rollup. Both tabs may; the second one waits.
   const returning = useRef(false);
+  const over = game?.phase === "finished" || pastDeadline;
   useEffect(() => {
-    if (game?.phase !== "finished" || returning.current) return;
+    if (!over || returning.current) return;
     returning.current = true;
     undelegate(seat.session, seat).catch((e) => {
-      console.warn("[rival] undelegate with the session key failed; Collect will retry with the wallet", e);
+      console.warn("[rival] undelegate with the session key failed; Collect or Refund retries with the wallet", e);
       returning.current = false;
     });
-  }, [game?.phase, seat]);
+  }, [over, seat]);
 
   if (!game) {
     return (
       <div className="flex flex-col gap-4">
-        <Skeleton className="aspect-[16/10] w-full rounded-[2.5rem] md:rounded-[50%]" />
+        <Skeleton className="aspect-16/10 w-full rounded-[2.5rem] md:rounded-[50%]" />
         <Skeleton className="h-20 w-full rounded-[1.25rem]" />
       </div>
     );
@@ -70,7 +75,7 @@ export function LiveTable({ seat, table, seats, busy, onCollect, onRefund, onGam
   if (game.phase === "finished") {
     const iWon = game.winner === me;
     below = (
-      <Card size="lg" className="rounded-[1.25rem] border border-brass/45" role="dialog" aria-labelledby="match-over">
+      <Card size="lg" className={cn("rounded-[1.25rem] border border-brass/45", PINNED_ON_PHONES)} role="dialog" aria-labelledby="match-over">
         <CardHeader>
           <CardTitle id="match-over" className="flex items-center gap-3 font-heading text-3xl font-extrabold tracking-tight">
             {iWon && <TrophyIcon aria-hidden="true" className="size-7 text-brass" />}
@@ -93,7 +98,7 @@ export function LiveTable({ seat, table, seats, busy, onCollect, onRefund, onGam
     );
   } else if (pastDeadline) {
     below = (
-      <Alert variant="quiet">
+      <Alert variant="quiet" className={PINNED_ON_PHONES}>
         <HourglassIcon />
         <AlertTitle className="text-base">Play stopped at the two-hour mark</AlertTitle>
         <AlertDescription className="text-sm">
@@ -109,6 +114,21 @@ export function LiveTable({ seat, table, seats, busy, onCollect, onRefund, onGam
     );
   } else if (game.phase === "dealing") {
     below = <ShuffleSteps hand={game.handNumber} secretIn={!!hand?.hasSecret} />;
+  } else if (displaced) {
+    below = (
+      <Alert variant="quiet" className={PINNED_ON_PHONES}>
+        <MonitorSmartphoneIcon />
+        <AlertTitle className="text-base">This match is open in another tab</AlertTitle>
+        <AlertDescription className="text-sm">
+          Your seat is being played from another tab or browser, so this one is watching. Taking it back here asks your wallet
+          once, and the other tab stops.
+        </AlertDescription>
+        <Button size="xl" className="col-start-2 mt-3 w-fit" onClick={onPlayHere} disabled={!!busy}>
+          {busy && <Spinner data-icon="inline-start" />}
+          {busy ?? "Play here instead"}
+        </Button>
+      </Alert>
+    );
   } else if (BETTING.has(game.phase)) {
     below = <ActionBar game={game} me={me} opponentName={seats[opp].name} acting={acting} onAct={act} />;
   } else {
@@ -122,7 +142,7 @@ export function LiveTable({ seat, table, seats, busy, onCollect, onRefund, onGam
   }
 
   return (
-    <div className="flex flex-wrap gap-6">
+    <div className="flex flex-wrap gap-6 max-md:pb-64">
       <section aria-label="Table" className="flex min-w-0 flex-[999_1_720px] flex-col gap-4.5">
         <Felt game={game} hand={hand} me={me} seats={seats} lastResult={lastResult} />
       </section>

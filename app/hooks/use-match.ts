@@ -76,8 +76,10 @@ export function useMatch(
               sessionStorage.setItem(resultsKey(seat), JSON.stringify(results));
             return { game, hand, lastResult: r, results };
           });
-          // One batch of automatic steps at a time; the next snapshot decides again.
-          if (due.length && !running.current) {
+          // One batch of automatic steps at a time; the next snapshot decides
+          // again. None if another tab has taken over this seat (its session
+          // key replaced ours): they'd only fail.
+          if (due.length && !running.current && isOurs(game, seat)) {
             running.current = true;
             runSteps(seat, due)
               .catch((e) => console.warn("[rival] automatic step failed", e))
@@ -114,5 +116,12 @@ export function useMatch(
     [seat]
   );
 
-  return { ...state, act, acting };
+  // Another tab of the same wallet registered its own session key for this seat.
+  const displaced = !!seat && !!state.game && !isOurs(state.game, seat);
+  return { ...state, act, acting, displaced };
+}
+
+/** True while the game still lists this tab's session key for its seat. */
+function isOurs(game: GameView, seat: Seat): boolean {
+  return !!game.sessionKeys[seat.seat]?.equals(seat.session.publicKey);
 }

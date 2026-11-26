@@ -7,6 +7,7 @@ import { Slider } from "@/components/ui/slider";
 import { Spinner } from "@/components/ui/spinner";
 import { TurnTimer, useSecondsLeft } from "@/components/rr/table-pieces";
 import { friendlyError } from "@/lib/errors";
+import { cn } from "@/lib/utils";
 import { TURN_SECONDS, type Action, type GameView } from "@/lib/rival";
 
 interface ActionBarProps {
@@ -18,6 +19,9 @@ interface ActionBarProps {
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+/** On phones the bar is pinned to the bottom of the screen, so acting never needs a scroll. */
+export const PINNED_ON_PHONES = "max-md:fixed max-md:w-auto max-md:inset-x-2 max-md:bottom-2 max-md:z-30 max-md:shadow-[0_-12px_40px_rgb(0_0_0/0.55)]";
 
 /**
  * Turn controls, at the top of the right-hand column. On your turn: Fold,
@@ -40,11 +44,14 @@ export function ActionBar({ game, me, opponentName, acting, onAct }: ActionBarPr
 
   const [chosen, setChosen] = useState<number | null>(null);
   const raiseTo = clamp(chosen ?? minTo, minTo, maxTo);
+  // Phones only: the slider and presets open above the bar on demand.
+  const [raiseOpen, setRaiseOpen] = useState(false);
 
   async function act(a: Action) {
     try {
       await onAct(a);
       setChosen(null);
+      setRaiseOpen(false);
     } catch (e) {
       toast.error(friendlyError(e));
     }
@@ -52,7 +59,7 @@ export function ActionBar({ game, me, opponentName, acting, onAct }: ActionBarPr
 
   if (!myTurn) {
     return (
-      <div className="flex items-center gap-3 rounded-[1.25rem] bg-card p-4" role="status">
+      <div className={cn("flex items-center gap-3 rounded-[1.25rem] bg-card p-4", PINNED_ON_PHONES)} role="status">
         <TurnTimer secondsLeft={secondsLeft} total={TURN_SECONDS} />
         <div className="flex flex-col">
           <span className="text-[15px] font-semibold">{opponentName}’s turn</span>
@@ -74,7 +81,7 @@ export function ActionBar({ game, me, opponentName, acting, onAct }: ActionBarPr
   ];
 
   return (
-    <div className="flex flex-col gap-3.5 rounded-[1.25rem] bg-card p-4 ring-2 ring-brass/70">
+    <div className={cn("flex flex-col gap-3.5 rounded-[1.25rem] bg-card p-4 ring-2 ring-brass/70 max-md:gap-2.5 max-md:p-3", PINNED_ON_PHONES)}>
       <div className="flex items-center gap-2.5">
         <TurnTimer secondsLeft={secondsLeft} total={TURN_SECONDS} />
         <div className="flex flex-col">
@@ -83,17 +90,22 @@ export function ActionBar({ game, me, opponentName, acting, onAct }: ActionBarPr
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className={cn("grid grid-cols-2 gap-2", canRaise && !raiseOpen && "max-md:grid-cols-3")}>
         <Button variant="fold" size="xl" disabled={acting} onClick={() => act({ fold: {} })}>
           Fold
         </Button>
         <Button variant="secondary" size="xl" disabled={acting} onClick={() => act(toCall === 0 ? { check: {} } : { call: {} })}>
           {callLabel}
         </Button>
+        {canRaise && !raiseOpen && (
+          <Button size="xl" className="md:hidden" disabled={acting} onClick={() => setRaiseOpen(true)}>
+            {raiseVerb === "Bet" ? "Bet…" : "Raise…"}
+          </Button>
+        )}
       </div>
 
       {canRaise && (
-        <div className="flex flex-col gap-2.5">
+        <div className={cn("flex flex-col gap-2.5", !raiseOpen && "max-md:hidden")}>
           {maxTo > minTo && (
             <>
               <Slider

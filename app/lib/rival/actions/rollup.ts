@@ -75,9 +75,14 @@ export async function enterRollup(
   const gameOn = (tee: Connection) =>
     waitFor("the game on the rollup", () => fetchGame(tee, keys.game), 30);
 
+  // A stake-time session key can read the game itself (it's a permission
+  // member), even after another tab replaced it: then only the wallet's
+  // approval is needed to take the seat back, no sign-in message.
+  let memberTee: Connection | null = null;
   if (canSitSilently(table, wallet.publicKey)) {
     const session = sessionKeypair(keys.game, wallet.publicKey);
     const tee = await teeConnection(asSigner(session));
+    memberTee = tee;
     const game = await gameOn(tee);
     if (game.sessionKeys[seat]?.equals(session.publicKey)) {
       if (!game.permissionsReady)
@@ -93,7 +98,7 @@ export async function enterRollup(
     // The wallet replaced the key since (e.g. from another tab): fall through.
   }
 
-  const tee = await teeConnection(wallet);
+  const tee = memberTee ?? (await teeConnection(wallet));
   const session = sessionKeypair(keys.game, wallet.publicKey);
   const game = await gameOn(tee);
   const ixs = [];

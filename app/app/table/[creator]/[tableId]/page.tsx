@@ -8,8 +8,8 @@ export default function TablePage() {
   return (
     <Suspense
       fallback={
-        <main className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-8">
-          <Skeleton className="aspect-[16/10] w-full rounded-[2.5rem] md:rounded-[50%]" />
+        <main className="mx-auto w-full max-w-360 px-4 py-6 sm:px-8">
+          <Skeleton className="aspect-16/10 w-full rounded-[2.5rem] md:rounded-[50%]" />
         </main>
       }
     >
